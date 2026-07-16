@@ -1,0 +1,6 @@
+server_name = "my-vps"
+bot_token_file = "/run/credentials/g7tg-agent.service/bot-token"
+state_database = "/var/lib/g7telegram-devops/state.sqlite3"
+poll_timeout_seconds = 40
+retry_seconds = 2
+

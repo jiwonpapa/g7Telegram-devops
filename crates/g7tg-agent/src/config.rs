@@ -19,6 +19,9 @@ pub struct AgentConfig {
     /// long polling timeout입니다.
     #[serde(default = "default_poll_timeout")]
     pub poll_timeout_seconds: u64,
+    /// Telegram 실패 뒤 최초 재시도 대기입니다.
+    #[serde(default = "default_retry_seconds")]
+    pub retry_seconds: u64,
 }
 
 impl AgentConfig {
@@ -46,6 +49,10 @@ impl AgentConfig {
             Path::new(&self.state_database).is_absolute(),
             "state_database는 절대 경로여야 합니다"
         );
+        ensure!(
+            (1..=30).contains(&self.retry_seconds),
+            "retry_seconds는 1~30이어야 합니다"
+        );
         Ok(())
     }
 }
@@ -56,6 +63,10 @@ fn default_state_database() -> String {
 
 const fn default_poll_timeout() -> u64 {
     40
+}
+
+const fn default_retry_seconds() -> u64 {
+    2
 }
 
 #[cfg(test)]
@@ -81,6 +92,7 @@ unexpected = true
             bot_token_file: "token".to_owned(),
             state_database: "/tmp/state.sqlite3".to_owned(),
             poll_timeout_seconds: 40,
+            retry_seconds: 2,
         };
         assert!(config.validate().is_err());
     }

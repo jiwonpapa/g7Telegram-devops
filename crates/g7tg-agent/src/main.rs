@@ -7,6 +7,11 @@ use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
 mod config;
+mod menu;
+mod runtime;
+mod storage;
+mod system;
+mod telegram;
 
 /// G7Telegram DevOps Agent CLI입니다.
 #[derive(Debug, Parser)]
@@ -28,6 +33,12 @@ enum Command {
     Run,
     /// 설정과 로컬 실행환경을 읽기 전용으로 검사합니다.
     Doctor,
+    /// 최초 Telegram owner 연결에 사용할 일회용 코드를 발급합니다.
+    Pair {
+        /// 연결 코드 유효시간입니다.
+        #[arg(long, default_value_t = 300)]
+        ttl_seconds: u64,
+    },
 }
 
 #[tokio::main]
@@ -45,12 +56,34 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Command::Run => {
-            tracing::info!(server = %config.server_name, "Agent 기본선이 준비되었습니다");
-            anyhow::bail!("배치 1 Telegram runtime은 아직 활성화되지 않았습니다")
+            config.validate()?;
+            runtime::run(config).await
         }
         Command::Doctor => {
             config.validate()?;
-            println!("PASS: configuration for {}", config.server_name);
+            let store = storage::Store::open(&config.state_database)?;
+            let owner = store.owner()?;
+            let owner_state = if owner.is_some() {
+                "paired"
+            } else {
+                "not-paired"
+            };
+            println!(
+                "PASS: configuration for {} ({owner_state})",
+                config.server_name
+            );
+            Ok(())
+        }
+        Command::Pair { ttl_seconds } => {
+            config.validate()?;
+            anyhow::ensure!(
+                (60..=900).contains(&ttl_seconds),
+                "ttl_seconds는 60~900이어야 합니다"
+            );
+            let store = storage::Store::open(&config.state_database)?;
+            let code = store.create_pairing_code(ttl_seconds)?;
+            println!("Telegram에서 다음 연결 코드를 보내십시오: {code}");
+            println!("유효시간: {ttl_seconds}초");
             Ok(())
         }
     }

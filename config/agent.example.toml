@@ -6,3 +6,8 @@ retry_seconds = 2
 
 # 자동 탐지 외에 표시할 root 관리 unit만 추가하십시오.
 extra_service_units = []
+
+# root allowlist를 검토한 뒤에만 활성화하십시오.
+service_actions_enabled = false
+action_executor = "/usr/lib/g7telegram-devops/g7tg-exec"
+approval_ttl_seconds = 45

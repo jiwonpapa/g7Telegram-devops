@@ -160,6 +160,17 @@ async fn show_unit(unit: &str, category: ServiceCategory) -> anyhow::Result<Serv
     })
 }
 
+/// 이미 발견·승인된 unit의 최신 상태를 다시 읽습니다.
+pub async fn refresh_status(
+    unit: &str,
+    category: ServiceCategory,
+) -> anyhow::Result<ServiceStatus> {
+    if !valid_unit_name(unit) {
+        return Err(anyhow!("잘못된 systemd unit입니다"));
+    }
+    show_unit(unit, category).await
+}
+
 async fn run_systemctl(arguments: &[&str]) -> anyhow::Result<String> {
     let child = Command::new("systemctl")
         .args(arguments)

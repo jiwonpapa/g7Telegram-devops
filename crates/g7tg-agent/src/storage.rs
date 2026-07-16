@@ -14,6 +14,8 @@ use subtle::ConstantTimeEq;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+use g7tg_core::ServiceAction;
+
 /// 등록된 Telegram owner입니다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Owner {
@@ -21,6 +23,17 @@ pub struct Owner {
     pub user_id: i64,
     /// 1:1 private chat ID입니다.
     pub chat_id: i64,
+}
+
+/// 소비된 단회 서비스 동작 승인입니다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Approval {
+    /// 승인한 Telegram user ID입니다.
+    pub actor_user_id: i64,
+    /// 승인한 동작입니다.
+    pub action: ServiceAction,
+    /// 승인한 정확한 systemd unit입니다.
+    pub unit: String,
 }
 
 /// 여러 async 작업에서 짧게 공유하는 SQLite 저장소입니다.
@@ -66,6 +79,16 @@ impl Store {
                 );
                 CREATE INDEX IF NOT EXISTS audit_events_occurred_at
                     ON audit_events(occurred_at);
+                CREATE TABLE IF NOT EXISTS approvals (
+                    token_hash BLOB PRIMARY KEY,
+                    actor_user_id INTEGER NOT NULL,
+                    action TEXT NOT NULL,
+                    unit TEXT NOT NULL,
+                    expires_at INTEGER NOT NULL,
+                    consumed_at INTEGER
+                );
+                CREATE INDEX IF NOT EXISTS approvals_expires_at
+                    ON approvals(expires_at);
                 "#,
             )
             .context("SQLite schema 준비 실패")?;
@@ -112,7 +135,7 @@ impl Store {
         let connection = self.lock()?;
         connection
             .execute(
-                "INSERT INTO pairing(singleton, code_hash, expires_at) VALUES(1, ?1, ?2)\
+                "INSERT INTO pairing(singleton, code_hash, expires_at) VALUES(1, ?1, ?2) \
                  ON CONFLICT(singleton) DO UPDATE SET code_hash=excluded.code_hash, expires_at=excluded.expires_at",
                 params![code_hash.as_slice(), expires_at],
             )
@@ -178,6 +201,110 @@ impl Store {
         insert_audit_on(&connection, actor_user_id, event_kind, outcome, detail)
     }
 
+    /// 특정 사용자·동작·unit에 묶인 단회 승인 token을 발급합니다.
+    pub fn create_approval(
+        &self,
+        actor_user_id: i64,
+        action: ServiceAction,
+        unit: &str,
+        ttl_seconds: u64,
+    ) -> anyhow::Result<String> {
+        let token = Uuid::new_v4().simple().to_string();
+        let token_hash = hash_code(&token);
+        let expires_at = now_unix()
+            .checked_add(i64::try_from(ttl_seconds).context("approval TTL 변환 실패")?)
+            .ok_or_else(|| anyhow!("approval 만료시각 overflow"))?;
+        let connection = self.lock()?;
+        connection
+            .execute(
+                "INSERT INTO approvals(token_hash, actor_user_id, action, unit, expires_at) \
+                 VALUES(?1, ?2, ?3, ?4, ?5)",
+                params![
+                    token_hash.as_slice(),
+                    actor_user_id,
+                    action.id(),
+                    unit,
+                    expires_at
+                ],
+            )
+            .context("approval 저장 실패")?;
+        Ok(token)
+    }
+
+    /// 승인 token을 정확히 한 번 소비합니다.
+    pub fn consume_approval(
+        &self,
+        token: &str,
+        actor_user_id: i64,
+    ) -> anyhow::Result<Option<Approval>> {
+        let token_hash = hash_code(token);
+        let mut connection = self.lock()?;
+        let transaction = connection
+            .transaction()
+            .context("approval transaction 시작 실패")?;
+        let row = transaction
+            .query_row(
+                "SELECT actor_user_id, action, unit, expires_at, consumed_at \
+                 FROM approvals WHERE token_hash=?1",
+                [token_hash.as_slice()],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, Option<i64>>(4)?,
+                    ))
+                },
+            )
+            .optional()
+            .context("approval 조회 실패")?;
+        let Some((stored_actor, action, unit, expires_at, consumed_at)) = row else {
+            return Ok(None);
+        };
+        if stored_actor != actor_user_id || expires_at < now_unix() || consumed_at.is_some() {
+            return Ok(None);
+        }
+        let action = match action.as_str() {
+            "restart" => ServiceAction::Restart,
+            _ => return Err(anyhow!("저장된 approval action이 올바르지 않습니다")),
+        };
+        transaction
+            .execute(
+                "UPDATE approvals SET consumed_at=?1 WHERE token_hash=?2 AND consumed_at IS NULL",
+                params![now_unix(), token_hash.as_slice()],
+            )
+            .context("approval 소비 실패")?;
+        transaction
+            .commit()
+            .context("approval transaction commit 실패")?;
+        Ok(Some(Approval {
+            actor_user_id,
+            action,
+            unit,
+        }))
+    }
+
+    /// 취소 callback도 token을 재사용할 수 없도록 소비합니다.
+    pub fn cancel_approval(&self, token: &str, actor_user_id: i64) -> anyhow::Result<bool> {
+        Ok(self.consume_approval(token, actor_user_id)?.is_some())
+    }
+
+    /// 만료·소비된 승인을 제한된 수로 정리합니다.
+    pub fn prune_approvals(&self) -> anyhow::Result<usize> {
+        let connection = self.lock()?;
+        connection
+            .execute(
+                "DELETE FROM approvals WHERE rowid IN ( \
+                    SELECT rowid FROM approvals \
+                    WHERE expires_at < ?1 OR consumed_at IS NOT NULL \
+                    ORDER BY expires_at ASC LIMIT 256 \
+                )",
+                [now_unix()],
+            )
+            .context("approval 정리 실패")
+    }
+
     fn metadata_i64(&self, key: &str) -> anyhow::Result<Option<i64>> {
         let connection = self.lock()?;
         let value = connection
@@ -206,7 +333,7 @@ impl Store {
 fn set_metadata_on(connection: &Connection, key: &str, value: &str) -> anyhow::Result<()> {
     connection
         .execute(
-            "INSERT INTO metadata(key, value) VALUES(?1, ?2)\
+            "INSERT INTO metadata(key, value) VALUES(?1, ?2) \
              ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             params![key, value],
         )
@@ -223,7 +350,7 @@ fn insert_audit_on(
 ) -> anyhow::Result<()> {
     connection
         .execute(
-            "INSERT INTO audit_events(occurred_at, actor_user_id, event_kind, outcome, detail)\
+            "INSERT INTO audit_events(occurred_at, actor_user_id, event_kind, outcome, detail) \
              VALUES(?1, ?2, ?3, ?4, ?5)",
             params![now_unix(), actor_user_id, event_kind, outcome, detail],
         )
@@ -267,6 +394,21 @@ mod tests {
         assert_eq!(store.update_offset()?, 0);
         store.set_update_offset(42)?;
         assert_eq!(store.update_offset()?, 42);
+        Ok(())
+    }
+
+    #[test]
+    fn approval_is_actor_bound_and_single_use() -> anyhow::Result<()> {
+        let directory = tempdir()?;
+        let store = Store::open(directory.path().join("state.sqlite3"))?;
+        let token =
+            store.create_approval(123, g7tg_core::ServiceAction::Restart, "nginx.service", 45)?;
+        assert!(store.consume_approval(&token, 999)?.is_none());
+        let approval = store
+            .consume_approval(&token, 123)?
+            .ok_or_else(|| anyhow::anyhow!("approval 없음"))?;
+        assert_eq!(approval.unit, "nginx.service");
+        assert!(store.consume_approval(&token, 123)?.is_none());
         Ok(())
     }
 }

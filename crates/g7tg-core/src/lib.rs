@@ -148,6 +148,32 @@ impl ServiceStatus {
     }
 }
 
+/// Telegram에서 허용하는 서비스 동작입니다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ServiceAction {
+    /// systemd restart입니다.
+    Restart,
+}
+
+impl ServiceAction {
+    /// 저장소와 executor에 사용하는 안정적인 ID입니다.
+    #[must_use]
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Restart => "restart",
+        }
+    }
+
+    /// 사용자 화면 label입니다.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Restart => "재시작",
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Menu, ServiceCategory, ServiceStatus};

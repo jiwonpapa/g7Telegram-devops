@@ -1,0 +1,48 @@
+#!/bin/sh
+set -eu
+
+ALLOWLIST=/etc/g7telegram-devops/allowed-units
+
+usage() {
+    echo "usage: g7tg-exec check|restart UNIT" >&2
+    exit 64
+}
+
+[ "$#" -eq 2 ] || usage
+action=$1
+unit=$2
+
+case "$unit" in
+    *[!A-Za-z0-9_.@:-]*|*.timer|*.socket|*.target|*.path|*.mount|*.slice|*.scope|*.device)
+        echo "invalid service unit" >&2
+        exit 64
+        ;;
+    *.service) ;;
+    *)
+        echo "invalid service unit" >&2
+        exit 64
+        ;;
+esac
+
+[ -f "$ALLOWLIST" ] || {
+    echo "allowlist unavailable" >&2
+    exit 77
+}
+
+/usr/bin/grep -F -x -q -- "$unit" "$ALLOWLIST" || {
+    echo "unit is not allowlisted" >&2
+    exit 77
+}
+
+if [ "$action" = check ]; then
+    exit 0
+fi
+
+[ "$action" = restart ] || usage
+[ "$(/usr/bin/id -u)" -eq 0 ] || {
+    echo "root is required" >&2
+    exit 77
+}
+
+exec /usr/bin/systemctl restart "$unit"
+

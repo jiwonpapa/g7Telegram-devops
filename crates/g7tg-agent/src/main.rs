@@ -6,6 +6,7 @@ use anyhow::Context;
 use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
+mod actions;
 mod config;
 mod menu;
 mod runtime;

@@ -25,6 +25,15 @@ pub struct AgentConfig {
     /// 자동 탐지 외에 표시할 root 관리 unit입니다.
     #[serde(default)]
     pub extra_service_units: Vec<String>,
+    /// Telegram 서비스 재시작 기능을 표시할지 결정합니다.
+    #[serde(default)]
+    pub service_actions_enabled: bool,
+    /// root-owned action executor 경로입니다.
+    #[serde(default = "default_action_executor")]
+    pub action_executor: String,
+    /// 재시작 승인 token의 유효시간입니다.
+    #[serde(default = "default_approval_ttl")]
+    pub approval_ttl_seconds: u64,
 }
 
 impl AgentConfig {
@@ -66,6 +75,14 @@ impl AgentConfig {
                 "허용되지 않는 systemd unit 이름입니다: {unit}"
             );
         }
+        ensure!(
+            Path::new(&self.action_executor).is_absolute(),
+            "action_executor는 절대 경로여야 합니다"
+        );
+        ensure!(
+            (20..=120).contains(&self.approval_ttl_seconds),
+            "approval_ttl_seconds는 20~120이어야 합니다"
+        );
         Ok(())
     }
 }
@@ -80,6 +97,14 @@ const fn default_poll_timeout() -> u64 {
 
 const fn default_retry_seconds() -> u64 {
     2
+}
+
+fn default_action_executor() -> String {
+    "/usr/lib/g7telegram-devops/g7tg-exec".to_owned()
+}
+
+const fn default_approval_ttl() -> u64 {
+    45
 }
 
 #[cfg(test)]
@@ -107,6 +132,9 @@ unexpected = true
             poll_timeout_seconds: 40,
             retry_seconds: 2,
             extra_service_units: Vec::new(),
+            service_actions_enabled: false,
+            action_executor: "/usr/lib/g7telegram-devops/g7tg-exec".to_owned(),
+            approval_ttl_seconds: 45,
         };
         assert!(config.validate().is_err());
     }

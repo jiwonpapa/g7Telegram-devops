@@ -7,6 +7,7 @@ use g7tg_core::Menu;
 use tokio::task;
 
 use crate::{
+    actions,
     config::AgentConfig,
     menu, services,
     storage::{Owner, Store},
@@ -172,6 +173,31 @@ async fn handle_callback(
         return Ok(());
     }
     let data = callback.data.as_deref().unwrap_or_default();
+    if let Some(rest) = data.strip_prefix("action:plan:") {
+        return handle_action_plan(config, store, telegram, &callback, message, rest).await;
+    }
+    if let Some(token) = data.strip_prefix("action:confirm:") {
+        return handle_action_confirm(config, store, telegram, &callback, message, token).await;
+    }
+    if let Some(token) = data.strip_prefix("action:cancel:") {
+        let cancelled = store.cancel_approval(token, callback.from.id)?;
+        let text = if cancelled {
+            "서비스 재시작을 취소했습니다."
+        } else {
+            "이미 사용했거나 만료된 승인입니다."
+        };
+        let view = menu::render_action_cancelled(text);
+        telegram
+            .edit_message(
+                message.chat.id,
+                message.message_id,
+                &view.text,
+                view.keyboard,
+            )
+            .await?;
+        telegram.answer_callback(&callback.id, "취소됨").await?;
+        return Ok(());
+    }
     if let Some(service_key) = data.strip_prefix("service:") {
         let inventory = services::discover(&config.extra_service_units).await?;
         let matches: Vec<_> = inventory
@@ -184,7 +210,9 @@ async fn handle_callback(
                 .await?;
             return Ok(());
         };
-        let view = menu::render_service_detail(service);
+        let action_allowed = config.service_actions_enabled
+            && actions::can_manage(&config.action_executor, &service.unit).await?;
+        let view = menu::render_service_detail(service, action_allowed);
         telegram
             .edit_message(
                 message.chat.id,
@@ -227,6 +255,136 @@ async fn handle_callback(
         )
         .await?;
     telegram.answer_callback(&callback.id, "완료").await?;
+    Ok(())
+}
+
+async fn handle_action_plan(
+    config: &AgentConfig,
+    store: &Store,
+    telegram: &TelegramClient,
+    callback: &CallbackQuery,
+    message: &Message,
+    payload: &str,
+) -> anyhow::Result<()> {
+    if !config.service_actions_enabled {
+        telegram
+            .answer_callback(&callback.id, "서비스 작업이 비활성화되어 있습니다.")
+            .await?;
+        return Ok(());
+    }
+    let Some((action_id, service_key)) = payload.split_once(':') else {
+        telegram
+            .answer_callback(&callback.id, "잘못된 재시작 요청입니다.")
+            .await?;
+        return Ok(());
+    };
+    let action = match action_id {
+        "restart" => g7tg_core::ServiceAction::Restart,
+        _ => {
+            telegram
+                .answer_callback(&callback.id, "허용되지 않은 동작입니다.")
+                .await?;
+            return Ok(());
+        }
+    };
+    let inventory = services::discover(&config.extra_service_units).await?;
+    let matches: Vec<_> = inventory
+        .iter()
+        .filter(|service| services::service_key(&service.unit) == service_key)
+        .collect();
+    let [service] = matches.as_slice() else {
+        telegram
+            .answer_callback(&callback.id, "서비스가 사라졌습니다.")
+            .await?;
+        return Ok(());
+    };
+    if !actions::can_manage(&config.action_executor, &service.unit).await? {
+        telegram
+            .answer_callback(&callback.id, "root allowlist에 없는 서비스입니다.")
+            .await?;
+        return Ok(());
+    }
+    let token = store.create_approval(
+        callback.from.id,
+        action,
+        &service.unit,
+        config.approval_ttl_seconds,
+    )?;
+    let view =
+        menu::render_action_confirmation(service, action, &token, config.approval_ttl_seconds);
+    telegram
+        .edit_message(
+            message.chat.id,
+            message.message_id,
+            &view.text,
+            view.keyboard,
+        )
+        .await?;
+    telegram
+        .answer_callback(&callback.id, "재승인이 필요합니다.")
+        .await?;
+    Ok(())
+}
+
+async fn handle_action_confirm(
+    config: &AgentConfig,
+    store: &Store,
+    telegram: &TelegramClient,
+    callback: &CallbackQuery,
+    message: &Message,
+    token: &str,
+) -> anyhow::Result<()> {
+    let Some(approval) = store.consume_approval(token, callback.from.id)? else {
+        let view = menu::render_action_cancelled("이미 사용했거나 만료된 승인입니다.");
+        telegram
+            .edit_message(
+                message.chat.id,
+                message.message_id,
+                &view.text,
+                view.keyboard,
+            )
+            .await?;
+        telegram.answer_callback(&callback.id, "승인 만료").await?;
+        return Ok(());
+    };
+    telegram.answer_callback(&callback.id, "실행 중").await?;
+    let inventory = services::discover(&config.extra_service_units).await?;
+    let Some(before) = inventory
+        .iter()
+        .find(|service| service.unit == approval.unit)
+    else {
+        store.audit(
+            Some(approval.actor_user_id),
+            "service_action",
+            "denied",
+            "unit_not_discovered",
+        )?;
+        return Err(anyhow!("승인한 서비스가 더 이상 발견되지 않습니다"));
+    };
+    let category = before.category;
+    let execution =
+        actions::execute(&config.action_executor, approval.action, &approval.unit).await;
+    let latest = services::refresh_status(&approval.unit, category).await?;
+    let success = execution.is_ok() && latest.is_healthy();
+    store.audit(
+        Some(approval.actor_user_id),
+        "service_action",
+        if success { "success" } else { "failed" },
+        &format!("{}:{}", approval.action.id(), approval.unit),
+    )?;
+    let _ = store.prune_approvals()?;
+    let view = menu::render_action_result(&latest, approval.action, success);
+    telegram
+        .edit_message(
+            message.chat.id,
+            message.message_id,
+            &view.text,
+            view.keyboard,
+        )
+        .await?;
+    if let Err(error) = execution {
+        tracing::warn!(unit = %approval.unit, error = %error, "서비스 action 실패");
+    }
     Ok(())
 }
 

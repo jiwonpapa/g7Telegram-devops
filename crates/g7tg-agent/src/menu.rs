@@ -1,6 +1,6 @@
 //! Telegram 메뉴 구성과 읽기 전용 화면 rendering입니다.
 
-use g7tg_core::{Menu, ServiceStatus, SystemSnapshot};
+use g7tg_core::{Menu, ServiceAction, ServiceStatus, SystemSnapshot};
 use serde_json::{Value, json};
 
 use crate::telegram::{InlineKeyboardButton, InlineKeyboardMarkup};
@@ -114,7 +114,25 @@ pub fn render_services(services: &[ServiceStatus]) -> MenuView {
 
 /// 단일 서비스의 systemd 상태를 render합니다.
 #[must_use]
-pub fn render_service_detail(service: &ServiceStatus) -> MenuView {
+pub fn render_service_detail(service: &ServiceStatus, action_allowed: bool) -> MenuView {
+    let mut rows = Vec::new();
+    if action_allowed {
+        rows.push(vec![button(
+            "서비스 재시작",
+            &format!(
+                "action:plan:{}:{}",
+                ServiceAction::Restart.id(),
+                crate::services::service_key(&service.unit)
+            ),
+        )]);
+    }
+    rows.push(vec![
+        button(
+            "새로고침",
+            &format!("service:{}", crate::services::service_key(&service.unit)),
+        ),
+        button("뒤로가기", "menu:services"),
+    ]);
     MenuView {
         text: format!(
             "서비스 상세\n이름: {}\n설명: {}\n분류: {}\n상태: {}\nActiveState: {}\nSubState: {}\nLoadState: {}",
@@ -127,13 +145,72 @@ pub fn render_service_detail(service: &ServiceStatus) -> MenuView {
             service.load_state
         ),
         keyboard: InlineKeyboardMarkup {
+            inline_keyboard: rows,
+        },
+    }
+}
+
+/// 재시작의 대상과 영향, 만료를 보여주는 재승인 화면입니다.
+#[must_use]
+pub fn render_action_confirmation(
+    service: &ServiceStatus,
+    action: ServiceAction,
+    token: &str,
+    ttl_seconds: u64,
+) -> MenuView {
+    MenuView {
+        text: format!(
+            "서비스 {} 승인\n대상: {}\n현재 상태: {} / {}\n영향: 진행 중인 연결 또는 작업이 잠시 중단될 수 있습니다.\n유효시간: {ttl_seconds}초\n\n실행하시겠습니까?",
+            action.label(),
+            service.unit,
+            service.active_state,
+            service.sub_state
+        ),
+        keyboard: InlineKeyboardMarkup {
+            inline_keyboard: vec![vec![
+                button("승인하고 실행", &format!("action:confirm:{token}")),
+                button("취소", &format!("action:cancel:{token}")),
+            ]],
+        },
+    }
+}
+
+/// 서비스 동작 결과 화면입니다.
+#[must_use]
+pub fn render_action_result(
+    service: &ServiceStatus,
+    action: ServiceAction,
+    success: bool,
+) -> MenuView {
+    let outcome = if success { "성공" } else { "실패" };
+    MenuView {
+        text: format!(
+            "서비스 {} {outcome}\n대상: {}\n현재 상태: {}\nActiveState: {}\nSubState: {}",
+            action.label(),
+            service.unit,
+            service.state_label(),
+            service.active_state,
+            service.sub_state
+        ),
+        keyboard: InlineKeyboardMarkup {
             inline_keyboard: vec![vec![
                 button(
-                    "새로고침",
+                    "서비스 상세",
                     &format!("service:{}", crate::services::service_key(&service.unit)),
                 ),
-                button("뒤로가기", "menu:services"),
+                button("목록", "menu:services"),
             ]],
+        },
+    }
+}
+
+/// 취소 또는 만료 결과입니다.
+#[must_use]
+pub fn render_action_cancelled(message: &str) -> MenuView {
+    MenuView {
+        text: message.to_owned(),
+        keyboard: InlineKeyboardMarkup {
+            inline_keyboard: vec![vec![button("서비스 목록", "menu:services")]],
         },
     }
 }

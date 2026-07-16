@@ -16,9 +16,8 @@ pub struct TelegramClient {
 }
 
 impl TelegramClient {
-    /// root 전용 파일에서 token을 읽습니다.
-    pub fn from_token_file(path: impl AsRef<Path>) -> anyhow::Result<Self> {
-        let token = fs::read_to_string(path.as_ref()).context("Bot token 파일 read 실패")?;
+    /// 입력받은 token으로 client를 만듭니다.
+    pub(crate) fn from_token(token: &str) -> anyhow::Result<Self> {
         let token = token.trim().to_owned();
         validate_token_shape(&token)?;
         let client = Client::builder()
@@ -29,6 +28,12 @@ impl TelegramClient {
             client,
             token: SecretString::from(token),
         })
+    }
+
+    /// root 전용 파일에서 token을 읽습니다.
+    pub fn from_token_file(path: impl AsRef<Path>) -> anyhow::Result<Self> {
+        let token = fs::read_to_string(path.as_ref()).context("Bot token 파일 read 실패")?;
+        Self::from_token(&token)
     }
 
     /// Bot token과 계정을 확인합니다.
@@ -313,13 +318,18 @@ pub(crate) fn validate_token_shape(token: &str) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Update, validate_token_shape};
+    use super::{TelegramClient, Update, validate_token_shape};
 
     #[test]
     fn bot_token_shape_is_fail_closed() {
         assert!(validate_token_shape("123456789:ABCdef_123456789-xyz").is_ok());
         assert!(validate_token_shape("not-a-token").is_err());
         assert!(validate_token_shape("123:../../secret").is_err());
+    }
+
+    #[test]
+    fn client_accepts_trimmed_token_without_exposing_it() {
+        assert!(TelegramClient::from_token(" 123456789:ABCdef_123456789-xyz\n").is_ok());
     }
 
     #[test]

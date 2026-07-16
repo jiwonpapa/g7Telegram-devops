@@ -21,4 +21,4 @@ fi
 /usr/bin/systemctl daemon-reload >/dev/null 2>&1 || true
 /usr/bin/systemctl try-restart g7tg-agent.service >/dev/null 2>&1 || true
 
-echo "Run: sudo g7tg setup --server-name <name>"
+echo "Run: sudo g7tg setup"

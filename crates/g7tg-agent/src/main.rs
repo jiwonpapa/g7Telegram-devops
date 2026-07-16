@@ -56,6 +56,9 @@ enum Command {
         /// 최초 연결코드 유효시간입니다.
         #[arg(long, default_value_t = 300)]
         pairing_ttl_seconds: u64,
+        /// 연결코드 출력 후 Telegram owner 등록을 기다리지 않습니다.
+        #[arg(long)]
+        no_wait_for_pairing: bool,
     },
 }
 
@@ -108,6 +111,7 @@ async fn main() -> anyhow::Result<()> {
             server_name,
             no_start,
             pairing_ttl_seconds,
+            no_wait_for_pairing,
         } => {
             setup::run(
                 &cli.config,
@@ -115,6 +119,7 @@ async fn main() -> anyhow::Result<()> {
                 server_name.as_deref(),
                 no_start,
                 pairing_ttl_seconds,
+                no_wait_for_pairing,
             )
             .await
         }

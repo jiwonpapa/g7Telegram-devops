@@ -12,18 +12,34 @@
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7Telegram-devops/main/scripts/install.sh | sudo sh
-sudo g7tg setup --server-name my-vps
+```
+
+최초 설치는 초기설정 시작 여부를 묻고, 동의하면 `setup`을 같은 터미널에서 실행합니다. 업데이트 설치는 기존 token과 owner ID를 유지합니다. 초기설정을 건너뛰었다면 다음 명령으로 다시 시작합니다.
+
+```bash
+sudo g7tg setup
 ```
 
 `setup`은 다음을 수행합니다.
 
-1. 화면에 표시하지 않는 Bot token 입력
-2. root 전용 secret 저장
-3. 관리 대상 systemd service 자동 탐지
-4. exact unit allowlist 생성
-5. 45초 재승인형 restart 기능 활성화
-6. 일회용 Telegram 연결코드 출력
+1. hostname을 기본값으로 서버 이름 입력
+2. 화면에 표시하지 않는 Bot token 입력
+3. Telegram `getMe`로 token과 Bot 계정 검증
+4. token을 root 전용 secret으로 저장
+5. 관리 대상 systemd service 자동 탐지
+6. exact unit allowlist와 45초 재승인형 restart 기능 설정
 7. Agent systemd enable/start
+8. 일회용 Telegram 연결코드 출력
+9. Bot 개인채팅에 코드를 보낸 발신자의 숫자 user/chat ID 자동 저장
+
+사용자명이나 수동 입력한 숫자 ID는 신뢰하지 않습니다. Telegram이 전달한 실제 private chat 발신자 ID만 단회 연결코드와 함께 저장합니다. 연결 대기를 생략하려면 `--no-wait-for-pairing`을 사용합니다.
+
+자동 설치에서 초기설정을 건너뛰려면 다음처럼 실행합니다.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7Telegram-devops/main/scripts/install.sh \
+  | sudo G7TG_SKIP_SETUP=1 sh
+```
 
 ## 상태 확인
 
@@ -47,7 +63,7 @@ sudo -u g7tg-agent /usr/bin/g7tg \
 `setup`을 다시 실행하면 owner와 incident 상태를 유지하면서 token, 서비스 탐지 결과와 설정을 갱신합니다.
 
 ```bash
-sudo g7tg setup --server-name my-vps
+sudo g7tg setup
 ```
 
 ## 업데이트와 롤백
@@ -62,7 +78,7 @@ curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7Telegram-devops/main/sc
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7Telegram-devops/main/scripts/install.sh \
-  | sudo G7TG_VERSION=0.1.0 sh
+  | sudo G7TG_VERSION=0.2.0 sh
 ```
 
 ## 제거

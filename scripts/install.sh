@@ -64,7 +64,9 @@ trap '/usr/bin/rm -rf "$temporary"' EXIT HUP INT TERM
     [ "$(/usr/bin/wc -l < SHA256SUMS.selected)" -eq 1 ]
     /usr/bin/sha256sum -c SHA256SUMS.selected
 )
-/usr/bin/apt-get install -y "$temporary/$asset"
+DEBIAN_FRONTEND=noninteractive /usr/bin/apt-get \
+    -o Dpkg::Options::=--force-confold \
+    install -y "$temporary/$asset"
 
 echo "Installed $asset"
 

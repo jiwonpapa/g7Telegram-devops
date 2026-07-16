@@ -1,6 +1,6 @@
 //! Telegram 메뉴 구성과 읽기 전용 화면 rendering입니다.
 
-use g7tg_core::{Menu, SystemSnapshot};
+use g7tg_core::{Menu, ServiceStatus, SystemSnapshot};
 use serde_json::{Value, json};
 
 use crate::telegram::{InlineKeyboardButton, InlineKeyboardMarkup};
@@ -64,6 +64,80 @@ pub fn render(menu: Menu, snapshot: Option<&SystemSnapshot>) -> MenuView {
     }
 }
 
+/// 탐지한 서비스 목록을 분류해 render합니다.
+#[must_use]
+pub fn render_services(services: &[ServiceStatus]) -> MenuView {
+    if services.is_empty() {
+        return MenuView {
+            text: "서비스\n관리 대상 웹서비스를 발견하지 못했습니다.".to_owned(),
+            keyboard: refresh_and_back("menu:services"),
+        };
+    }
+    let healthy = services
+        .iter()
+        .filter(|service| service.is_healthy())
+        .count();
+    let mut lines = vec![format!(
+        "서비스 상태\n정상 {healthy}개 · 확인필요 {}개",
+        services.len().saturating_sub(healthy)
+    )];
+    let mut rows = Vec::new();
+    let mut previous_category = None;
+    for service in services.iter().take(24) {
+        if previous_category != Some(service.category) {
+            lines.push(format!("\n[{}]", service.category.label()));
+            previous_category = Some(service.category);
+        }
+        lines.push(format!("{} · {}", service.unit, service.state_label()));
+        rows.push(vec![button(
+            &format!("{} · {}", service.state_label(), short_unit(&service.unit)),
+            &format!("service:{}", crate::services::service_key(&service.unit)),
+        )]);
+    }
+    if services.len() > 24 {
+        lines.push(format!(
+            "\n외 {}개는 화면 한도로 생략했습니다.",
+            services.len() - 24
+        ));
+    }
+    rows.push(vec![
+        button("새로고침", "menu:services"),
+        button("뒤로가기", "menu:main"),
+    ]);
+    MenuView {
+        text: lines.join("\n"),
+        keyboard: InlineKeyboardMarkup {
+            inline_keyboard: rows,
+        },
+    }
+}
+
+/// 단일 서비스의 systemd 상태를 render합니다.
+#[must_use]
+pub fn render_service_detail(service: &ServiceStatus) -> MenuView {
+    MenuView {
+        text: format!(
+            "서비스 상세\n이름: {}\n설명: {}\n분류: {}\n상태: {}\nActiveState: {}\nSubState: {}\nLoadState: {}",
+            service.unit,
+            service.description,
+            service.category.label(),
+            service.state_label(),
+            service.active_state,
+            service.sub_state,
+            service.load_state
+        ),
+        keyboard: InlineKeyboardMarkup {
+            inline_keyboard: vec![vec![
+                button(
+                    "새로고침",
+                    &format!("service:{}", crate::services::service_key(&service.unit)),
+                ),
+                button("뒤로가기", "menu:services"),
+            ]],
+        },
+    }
+}
+
 fn format_system_snapshot(snapshot: &SystemSnapshot) -> String {
     let memory_percent = percent(snapshot.memory_used_bytes, snapshot.memory_total_bytes);
     let swap_percent = percent(snapshot.swap_used_bytes, snapshot.swap_total_bytes);
@@ -106,6 +180,15 @@ fn placeholder(title: &str, body: &str) -> MenuView {
         text: format!("{title}\n{body}"),
         keyboard: back_only(),
     }
+}
+
+fn short_unit(unit: &str) -> String {
+    const MAX_CHARS: usize = 32;
+    let mut short: String = unit.chars().take(MAX_CHARS).collect();
+    if unit.chars().count() > MAX_CHARS {
+        short.push('…');
+    }
+    short
 }
 
 fn refresh_and_back(callback: &str) -> InlineKeyboardMarkup {

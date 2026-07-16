@@ -4,3 +4,5 @@ state_database = "/var/lib/g7telegram-devops/state.sqlite3"
 poll_timeout_seconds = 40
 retry_seconds = 2
 
+# 자동 탐지 외에 표시할 root 관리 unit만 추가하십시오.
+extra_service_units = []

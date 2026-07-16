@@ -22,6 +22,9 @@ pub struct AgentConfig {
     /// Telegram 실패 뒤 최초 재시도 대기입니다.
     #[serde(default = "default_retry_seconds")]
     pub retry_seconds: u64,
+    /// 자동 탐지 외에 표시할 root 관리 unit입니다.
+    #[serde(default)]
+    pub extra_service_units: Vec<String>,
 }
 
 impl AgentConfig {
@@ -53,6 +56,16 @@ impl AgentConfig {
             (1..=30).contains(&self.retry_seconds),
             "retry_seconds는 1~30이어야 합니다"
         );
+        ensure!(
+            self.extra_service_units.len() <= 32,
+            "extra_service_units는 최대 32개입니다"
+        );
+        for unit in &self.extra_service_units {
+            ensure!(
+                crate::services::valid_unit_name(unit),
+                "허용되지 않는 systemd unit 이름입니다: {unit}"
+            );
+        }
         Ok(())
     }
 }
@@ -93,6 +106,7 @@ unexpected = true
             state_database: "/tmp/state.sqlite3".to_owned(),
             poll_timeout_seconds: 40,
             retry_seconds: 2,
+            extra_service_units: Vec::new(),
         };
         assert!(config.validate().is_err());
     }

@@ -76,14 +76,101 @@ pub struct SystemSnapshot {
     pub disks: Vec<DiskSnapshot>,
 }
 
+/// 운영 화면에서 사용하는 서비스 분류입니다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ServiceCategory {
+    /// Nginx, Apache, Caddy입니다.
+    Web,
+    /// PHP-FPM입니다.
+    Php,
+    /// MariaDB, MySQL, PostgreSQL입니다.
+    Database,
+    /// Redis, Memcached입니다.
+    Cache,
+    /// 명시적으로 발견된 G7/Laravel 장기 실행 서비스입니다.
+    Application,
+    /// 관리자가 설정에 추가한 서비스입니다.
+    Extra,
+}
+
+impl ServiceCategory {
+    /// 한국어 화면 label입니다.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Web => "웹서버",
+            Self::Php => "PHP",
+            Self::Database => "데이터베이스",
+            Self::Cache => "캐시",
+            Self::Application => "G7/앱",
+            Self::Extra => "추가 서비스",
+        }
+    }
+}
+
+/// systemd에서 읽은 서비스 상태입니다.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ServiceStatus {
+    /// systemd unit ID입니다.
+    pub unit: String,
+    /// unit Description입니다.
+    pub description: String,
+    /// 운영 화면 분류입니다.
+    pub category: ServiceCategory,
+    /// systemd LoadState입니다.
+    pub load_state: String,
+    /// systemd ActiveState입니다.
+    pub active_state: String,
+    /// systemd SubState입니다.
+    pub sub_state: String,
+}
+
+impl ServiceStatus {
+    /// 정상 실행 여부입니다.
+    #[must_use]
+    pub fn is_healthy(&self) -> bool {
+        self.load_state == "loaded" && self.active_state == "active"
+    }
+
+    /// 사용자 화면의 짧은 상태입니다.
+    #[must_use]
+    pub fn state_label(&self) -> &'static str {
+        if self.is_healthy() {
+            "정상"
+        } else if self.active_state == "failed" {
+            "장애"
+        } else if self.load_state == "not-found" {
+            "없음"
+        } else {
+            "중지"
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::Menu;
+    use super::{Menu, ServiceCategory, ServiceStatus};
 
     #[test]
     fn menu_callbacks_are_fail_closed() {
         assert_eq!(Menu::from_callback("menu:system"), Some(Menu::System));
         assert_eq!(Menu::from_callback("menu:root"), None);
         assert_eq!(Menu::from_callback("action:restart"), None);
+    }
+
+    #[test]
+    fn service_health_requires_loaded_and_active() {
+        let mut service = ServiceStatus {
+            unit: "nginx.service".to_owned(),
+            description: "Nginx".to_owned(),
+            category: ServiceCategory::Web,
+            load_state: "loaded".to_owned(),
+            active_state: "active".to_owned(),
+            sub_state: "running".to_owned(),
+        };
+        assert!(service.is_healthy());
+        service.active_state = "activating".to_owned();
+        assert!(!service.is_healthy());
     }
 }

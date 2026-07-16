@@ -8,7 +8,7 @@ use tokio::task;
 
 use crate::{
     config::AgentConfig,
-    menu,
+    menu, services,
     storage::{Owner, Store},
     system,
     telegram::{CallbackQuery, Message, TelegramClient, Update},
@@ -172,6 +172,30 @@ async fn handle_callback(
         return Ok(());
     }
     let data = callback.data.as_deref().unwrap_or_default();
+    if let Some(service_key) = data.strip_prefix("service:") {
+        let inventory = services::discover(&config.extra_service_units).await?;
+        let matches: Vec<_> = inventory
+            .iter()
+            .filter(|service| services::service_key(&service.unit) == service_key)
+            .collect();
+        let [service] = matches.as_slice() else {
+            telegram
+                .answer_callback(&callback.id, "서비스가 사라졌거나 메뉴가 만료되었습니다.")
+                .await?;
+            return Ok(());
+        };
+        let view = menu::render_service_detail(service);
+        telegram
+            .edit_message(
+                message.chat.id,
+                message.message_id,
+                &view.text,
+                view.keyboard,
+            )
+            .await?;
+        telegram.answer_callback(&callback.id, "완료").await?;
+        return Ok(());
+    }
     let Some(target_menu) = Menu::from_callback(data) else {
         telegram
             .answer_callback(&callback.id, "만료되었거나 잘못된 메뉴입니다.")
@@ -188,7 +212,12 @@ async fn handle_callback(
     } else {
         None
     };
-    let view = menu::render(target_menu, snapshot.as_ref());
+    let view = if target_menu == Menu::Services {
+        let inventory = services::discover(&config.extra_service_units).await?;
+        menu::render_services(&inventory)
+    } else {
+        menu::render(target_menu, snapshot.as_ref())
+    };
     telegram
         .edit_message(
             message.chat.id,
@@ -217,7 +246,12 @@ async fn send_new_menu(
     } else {
         None
     };
-    let view = menu::render(target_menu, snapshot.as_ref());
+    let view = if target_menu == Menu::Services {
+        let inventory = services::discover(&config.extra_service_units).await?;
+        menu::render_services(&inventory)
+    } else {
+        menu::render(target_menu, snapshot.as_ref())
+    };
     telegram
         .send_message(
             chat_id,

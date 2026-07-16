@@ -9,6 +9,7 @@ use tracing_subscriber::EnvFilter;
 mod config;
 mod menu;
 mod runtime;
+mod services;
 mod storage;
 mod system;
 mod telegram;

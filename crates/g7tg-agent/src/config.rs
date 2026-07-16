@@ -4,6 +4,7 @@ use std::{fs, path::Path};
 
 use anyhow::{Context, ensure};
 use serde::Deserialize;
+use url::Url;
 
 /// Agent의 정적 설정입니다.
 #[derive(Debug, Clone, Deserialize)]
@@ -34,6 +35,43 @@ pub struct AgentConfig {
     /// 재시작 승인 token의 유효시간입니다.
     #[serde(default = "default_approval_ttl")]
     pub approval_ttl_seconds: u64,
+    /// 공개 웹 endpoint의 최소 가용성 검사입니다.
+    #[serde(default)]
+    pub web_checks: Vec<WebCheckConfig>,
+    /// 상태·서비스·웹 검사를 반복할 주기입니다.
+    #[serde(default = "default_monitor_interval")]
+    pub monitor_interval_seconds: u64,
+    /// 동일 문제를 장애로 확정할 연속 횟수입니다.
+    #[serde(default = "default_confirmation_count")]
+    pub incident_confirmation_count: u32,
+    /// 메모리 사용률 경고 기준입니다.
+    #[serde(default = "default_memory_warning_percent")]
+    pub memory_warning_percent: f64,
+    /// 디스크 사용률 경고 기준입니다.
+    #[serde(default = "default_disk_warning_percent")]
+    pub disk_warning_percent: f64,
+}
+
+/// 공개 웹 endpoint의 최소 검사 설정입니다.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WebCheckConfig {
+    /// Telegram 화면과 incident key에 쓰는 이름입니다.
+    pub name: String,
+    /// query와 credential이 없는 HTTP(S) URL입니다.
+    pub url: String,
+    /// 허용할 최소 HTTP status입니다.
+    #[serde(default = "default_status_min")]
+    pub expected_status_min: u16,
+    /// 허용할 최대 HTTP status입니다.
+    #[serde(default = "default_status_max")]
+    pub expected_status_max: u16,
+    /// 요청 timeout입니다.
+    #[serde(default = "default_web_timeout")]
+    pub timeout_seconds: u64,
+    /// HTTPS 인증서 만료 경고 기준입니다.
+    #[serde(default = "default_tls_warning_days")]
+    pub tls_warning_days: i64,
 }
 
 impl AgentConfig {
@@ -83,6 +121,75 @@ impl AgentConfig {
             (20..=120).contains(&self.approval_ttl_seconds),
             "approval_ttl_seconds는 20~120이어야 합니다"
         );
+        ensure!(self.web_checks.len() <= 8, "web_checks는 최대 8개입니다");
+        let mut names = std::collections::BTreeSet::new();
+        for check in &self.web_checks {
+            check.validate()?;
+            ensure!(
+                names.insert(check.name.as_str()),
+                "web check 이름이 중복됩니다"
+            );
+        }
+        ensure!(
+            (30..=300).contains(&self.monitor_interval_seconds),
+            "monitor_interval_seconds는 30~300이어야 합니다"
+        );
+        ensure!(
+            (1..=5).contains(&self.incident_confirmation_count),
+            "incident_confirmation_count는 1~5여야 합니다"
+        );
+        ensure!(
+            (50.0..=99.0).contains(&self.memory_warning_percent),
+            "memory_warning_percent는 50~99여야 합니다"
+        );
+        ensure!(
+            (50.0..=99.0).contains(&self.disk_warning_percent),
+            "disk_warning_percent는 50~99여야 합니다"
+        );
+        Ok(())
+    }
+}
+
+impl WebCheckConfig {
+    fn validate(&self) -> anyhow::Result<()> {
+        ensure!(
+            !self.name.trim().is_empty() && self.name.chars().count() <= 40,
+            "web check 이름은 1~40자여야 합니다"
+        );
+        ensure!(
+            self.name.chars().all(
+                |character| character.is_alphanumeric() || matches!(character, '-' | '_' | ' ')
+            ),
+            "web check 이름에 허용되지 않는 문자가 있습니다"
+        );
+        let url = Url::parse(&self.url).context("web check URL parse 실패")?;
+        ensure!(
+            matches!(url.scheme(), "http" | "https"),
+            "web check는 HTTP(S)만 허용합니다"
+        );
+        ensure!(url.host_str().is_some(), "web check host가 없습니다");
+        ensure!(
+            url.username().is_empty() && url.password().is_none(),
+            "URL credential을 허용하지 않습니다"
+        );
+        ensure!(
+            url.query().is_none() && url.fragment().is_none(),
+            "URL query와 fragment를 허용하지 않습니다"
+        );
+        ensure!(
+            (100..=599).contains(&self.expected_status_min)
+                && self.expected_status_min <= self.expected_status_max
+                && self.expected_status_max <= 599,
+            "HTTP status 범위가 올바르지 않습니다"
+        );
+        ensure!(
+            (1..=15).contains(&self.timeout_seconds),
+            "web timeout은 1~15초여야 합니다"
+        );
+        ensure!(
+            (1..=90).contains(&self.tls_warning_days),
+            "TLS 경고일은 1~90일이어야 합니다"
+        );
         Ok(())
     }
 }
@@ -105,6 +212,38 @@ fn default_action_executor() -> String {
 
 const fn default_approval_ttl() -> u64 {
     45
+}
+
+const fn default_monitor_interval() -> u64 {
+    60
+}
+
+const fn default_confirmation_count() -> u32 {
+    2
+}
+
+const fn default_memory_warning_percent() -> f64 {
+    90.0
+}
+
+const fn default_disk_warning_percent() -> f64 {
+    85.0
+}
+
+const fn default_status_min() -> u16 {
+    200
+}
+
+const fn default_status_max() -> u16 {
+    399
+}
+
+const fn default_web_timeout() -> u64 {
+    5
+}
+
+const fn default_tls_warning_days() -> i64 {
+    14
 }
 
 #[cfg(test)]
@@ -135,7 +274,25 @@ unexpected = true
             service_actions_enabled: false,
             action_executor: "/usr/lib/g7telegram-devops/g7tg-exec".to_owned(),
             approval_ttl_seconds: 45,
+            web_checks: Vec::new(),
+            monitor_interval_seconds: 60,
+            incident_confirmation_count: 2,
+            memory_warning_percent: 90.0,
+            disk_warning_percent: 85.0,
         };
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn web_check_rejects_query_secrets() {
+        let check = super::WebCheckConfig {
+            name: "main".to_owned(),
+            url: "https://example.com/health?token=secret".to_owned(),
+            expected_status_min: 200,
+            expected_status_max: 399,
+            timeout_seconds: 5,
+            tls_warning_days: 14,
+        };
+        assert!(check.validate().is_err());
     }
 }

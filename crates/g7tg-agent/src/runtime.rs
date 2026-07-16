@@ -9,7 +9,7 @@ use tokio::task;
 use crate::{
     actions,
     config::AgentConfig,
-    menu, services,
+    menu, monitor, services,
     storage::{Owner, Store},
     system,
     telegram::{CallbackQuery, Message, TelegramClient, Update},
@@ -31,12 +31,21 @@ pub async fn run(config: AgentConfig) -> anyhow::Result<()> {
 
     let mut offset = store.update_offset()?;
     let mut retry_seconds = config.retry_seconds;
+    let mut monitor_interval =
+        tokio::time::interval(Duration::from_secs(config.monitor_interval_seconds));
+    monitor_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         let updates = tokio::select! {
             signal = tokio::signal::ctrl_c() => {
                 signal.context("종료 신호 처리 실패")?;
                 tracing::info!("종료 신호를 받았습니다");
                 return Ok(());
+            }
+            _ = monitor_interval.tick() => {
+                if let Err(error) = monitor::cycle(&config, &store, &telegram).await {
+                    tracing::warn!(error = %error, "monitoring cycle 실패");
+                }
+                continue;
             }
             result = telegram.get_updates(offset, config.poll_timeout_seconds) => result,
         };
@@ -109,7 +118,7 @@ async fn handle_message(
                     Some(menu::persistent_menu_keyboard()),
                 )
                 .await?;
-            send_new_menu(config, telegram, message.chat.id, Menu::Main).await?;
+            send_new_menu(config, store, telegram, message.chat.id, Menu::Main).await?;
         }
         return Ok(());
     }
@@ -129,7 +138,7 @@ async fn handle_message(
                 )
                 .await?;
         }
-        send_new_menu(config, telegram, owner.chat_id, Menu::Main).await?;
+        send_new_menu(config, store, telegram, owner.chat_id, Menu::Main).await?;
     } else {
         telegram
             .send_message(
@@ -173,6 +182,34 @@ async fn handle_callback(
         return Ok(());
     }
     let data = callback.data.as_deref().unwrap_or_default();
+    if let Some(value) = data.strip_prefix("silence:") {
+        match value {
+            "3600" => {
+                let _ = store.set_silence(3600)?;
+            }
+            "21600" => {
+                let _ = store.set_silence(21_600)?;
+            }
+            "clear" => store.clear_silence()?,
+            _ => {
+                telegram
+                    .answer_callback(&callback.id, "잘못된 알림중지 요청입니다.")
+                    .await?;
+                return Ok(());
+            }
+        }
+        let view = menu::render_alerts(&store.current_incidents()?, store.silence_until()?);
+        telegram
+            .edit_message(
+                message.chat.id,
+                message.message_id,
+                &view.text,
+                view.keyboard,
+            )
+            .await?;
+        telegram.answer_callback(&callback.id, "적용됨").await?;
+        return Ok(());
+    }
     if let Some(rest) = data.strip_prefix("action:plan:") {
         return handle_action_plan(config, store, telegram, &callback, message, rest).await;
     }
@@ -240,11 +277,17 @@ async fn handle_callback(
     } else {
         None
     };
-    let view = if target_menu == Menu::Services {
-        let inventory = services::discover(&config.extra_service_units).await?;
-        menu::render_services(&inventory)
-    } else {
-        menu::render(target_menu, snapshot.as_ref())
+    let view = match target_menu {
+        Menu::Services => {
+            let inventory = services::discover(&config.extra_service_units).await?;
+            menu::render_services(&inventory)
+        }
+        Menu::Web => {
+            let results = crate::web::check_all(&config.web_checks).await?;
+            menu::render_web_checks(&results)
+        }
+        Menu::Alerts => menu::render_alerts(&store.current_incidents()?, store.silence_until()?),
+        _ => menu::render(target_menu, snapshot.as_ref()),
     };
     telegram
         .edit_message(
@@ -390,6 +433,7 @@ async fn handle_action_confirm(
 
 async fn send_new_menu(
     config: &AgentConfig,
+    store: &Store,
     telegram: &TelegramClient,
     chat_id: i64,
     target_menu: Menu,
@@ -404,11 +448,17 @@ async fn send_new_menu(
     } else {
         None
     };
-    let view = if target_menu == Menu::Services {
-        let inventory = services::discover(&config.extra_service_units).await?;
-        menu::render_services(&inventory)
-    } else {
-        menu::render(target_menu, snapshot.as_ref())
+    let view = match target_menu {
+        Menu::Services => {
+            let inventory = services::discover(&config.extra_service_units).await?;
+            menu::render_services(&inventory)
+        }
+        Menu::Web => {
+            let results = crate::web::check_all(&config.web_checks).await?;
+            menu::render_web_checks(&results)
+        }
+        Menu::Alerts => menu::render_alerts(&store.current_incidents()?, store.silence_until()?),
+        _ => menu::render(target_menu, snapshot.as_ref()),
     };
     telegram
         .send_message(

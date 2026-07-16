@@ -156,6 +156,25 @@ pub enum ServiceAction {
     Restart,
 }
 
+/// 설정한 웹 endpoint의 최소 가용성 결과입니다.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WebCheckResult {
+    /// 화면에 표시할 check 이름입니다.
+    pub name: String,
+    /// 비밀 query를 허용하지 않는 공개 URL입니다.
+    pub url: String,
+    /// HTTP status입니다.
+    pub status_code: Option<u16>,
+    /// header 수신까지의 시간입니다.
+    pub latency_ms: Option<u64>,
+    /// HTTPS일 때 인증서 만료까지 남은 일수입니다.
+    pub tls_days_remaining: Option<i64>,
+    /// 기대 status와 TLS 유효성을 모두 만족했는지 표시합니다.
+    pub healthy: bool,
+    /// 비밀값을 포함하지 않는 안정적인 오류 코드입니다.
+    pub error_code: Option<String>,
+}
+
 impl ServiceAction {
     /// 저장소와 executor에 사용하는 안정적인 ID입니다.
     #[must_use]

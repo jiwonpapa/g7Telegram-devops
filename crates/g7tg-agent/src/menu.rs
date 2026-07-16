@@ -3,7 +3,10 @@
 use g7tg_core::{Menu, ServiceAction, ServiceStatus, SystemSnapshot};
 use serde_json::{Value, json};
 
-use crate::telegram::{InlineKeyboardButton, InlineKeyboardMarkup};
+use crate::{
+    storage::CurrentIncident,
+    telegram::{InlineKeyboardButton, InlineKeyboardMarkup},
+};
 
 /// 메뉴 화면의 text와 inline keyboard입니다.
 pub struct MenuView {
@@ -102,6 +105,85 @@ pub fn render_services(services: &[ServiceStatus]) -> MenuView {
     }
     rows.push(vec![
         button("새로고침", "menu:services"),
+        button("뒤로가기", "menu:main"),
+    ]);
+    MenuView {
+        text: lines.join("\n"),
+        keyboard: InlineKeyboardMarkup {
+            inline_keyboard: rows,
+        },
+    }
+}
+
+/// 설정된 웹 endpoint의 최소 가용성 결과를 render합니다.
+#[must_use]
+pub fn render_web_checks(results: &[g7tg_core::WebCheckResult]) -> MenuView {
+    if results.is_empty() {
+        return MenuView {
+            text: "웹 상태\n검사 대상이 설정되지 않았습니다.\n서비스 상태만으로 운영합니다."
+                .to_owned(),
+            keyboard: back_only(),
+        };
+    }
+    let mut lines = vec!["웹 상태".to_owned()];
+    for result in results {
+        let state = if result.healthy {
+            "정상"
+        } else {
+            "확인필요"
+        };
+        let status = result
+            .status_code
+            .map_or_else(|| "-".to_owned(), |status| status.to_string());
+        let latency = result
+            .latency_ms
+            .map_or_else(|| "-".to_owned(), |latency| format!("{latency}ms"));
+        lines.push(format!("\n{} · {state}", result.name));
+        lines.push(format!("HTTP: {status} · 응답: {latency}"));
+        if let Some(days) = result.tls_days_remaining {
+            lines.push(format!("TLS: {days}일 남음"));
+        }
+        if let Some(error) = &result.error_code {
+            lines.push(format!("오류: {error}"));
+        }
+    }
+    MenuView {
+        text: lines.join("\n"),
+        keyboard: refresh_and_back("menu:web"),
+    }
+}
+
+/// 확인 횟수를 통과한 현재 장애를 render합니다.
+#[must_use]
+pub fn render_alerts(incidents: &[CurrentIncident], silence_until: Option<i64>) -> MenuView {
+    let mut lines = vec!["장애/알림".to_owned()];
+    if let Some(expires_at) = silence_until {
+        let remaining_minutes = expires_at
+            .saturating_sub(time::OffsetDateTime::now_utc().unix_timestamp())
+            .saturating_add(59)
+            / 60;
+        lines.push(format!("알림 일시중지 중 · 약 {remaining_minutes}분 남음"));
+    }
+    if incidents.is_empty() {
+        lines.push("현재 확인된 장애가 없습니다.".to_owned());
+    } else {
+        for incident in incidents {
+            lines.push(format!(
+                "\n[{}] {}\n{}",
+                incident.severity, incident.key, incident.summary
+            ));
+        }
+    }
+    let mut rows = if silence_until.is_some() {
+        vec![vec![button("알림중지 해제", "silence:clear")]]
+    } else {
+        vec![vec![
+            button("1시간 중지", "silence:3600"),
+            button("6시간 중지", "silence:21600"),
+        ]]
+    };
+    rows.push(vec![
+        button("새로고침", "menu:alerts"),
         button("뒤로가기", "menu:main"),
     ]);
     MenuView {

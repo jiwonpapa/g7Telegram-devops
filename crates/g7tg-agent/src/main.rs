@@ -9,11 +9,14 @@ use tracing_subscriber::EnvFilter;
 mod actions;
 mod config;
 mod menu;
+mod monitor;
 mod runtime;
 mod services;
 mod storage;
 mod system;
 mod telegram;
+mod tls;
+mod web;
 
 /// G7Telegram DevOps Agent CLI입니다.
 #[derive(Debug, Parser)]

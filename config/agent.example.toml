@@ -11,3 +11,17 @@ extra_service_units = []
 service_actions_enabled = false
 action_executor = "/usr/lib/g7telegram-devops/g7tg-exec"
 approval_ttl_seconds = 45
+
+monitor_interval_seconds = 60
+incident_confirmation_count = 2
+memory_warning_percent = 90.0
+disk_warning_percent = 85.0
+
+# 본문은 검사하지 않습니다. status, latency, TLS 유효기간만 확인합니다.
+# [[web_checks]]
+# name = "대표 사이트"
+# url = "https://example.com/"
+# expected_status_min = 200
+# expected_status_max = 399
+# timeout_seconds = 5
+# tls_warning_days = 14

@@ -307,8 +307,8 @@ fn format_system_snapshot(snapshot: &SystemSnapshot) -> String {
         format!("Kernel: {}", snapshot.kernel_version),
         format!("Uptime: {}", format_uptime(snapshot.uptime_seconds)),
         format!(
-            "CPU: {:.1}% · Load: {:.2}",
-            snapshot.cpu_usage_percent, snapshot.load_one
+            "CPU: {:.1}% · Load: {:.2} / {}CPU",
+            snapshot.cpu_usage_percent, snapshot.load_one, snapshot.logical_cpu_count
         ),
         format!(
             "메모리: {} / {} ({memory_percent:.1}%)",
@@ -411,6 +411,7 @@ mod tests {
             kernel_version: "6.8".to_owned(),
             uptime_seconds: 90_061,
             cpu_usage_percent: 12.5,
+            logical_cpu_count: 2,
             load_one: 0.2,
             memory_total_bytes: 2 * 1024 * 1024 * 1024,
             memory_used_bytes: 1024 * 1024 * 1024,

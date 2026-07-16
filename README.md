@@ -6,7 +6,7 @@ Ubuntu VPS 한 대와 Telegram Bot 한 개를 직접 연결하는 로컬 우선 
 
 - 중앙 관제 서버와 중앙 데이터베이스를 사용하지 않습니다.
 - VPS에서 Telegram Bot API로 outbound HTTPS long polling만 수행합니다.
-- 일반 웹서비스와 systemd 서비스 상태를 우선 지원합니다.
+- CPU·Load·메모리·Swap·디스크, 일반 웹서비스와 systemd 서비스 상태를 우선 지원합니다.
 - GnuBoard 7이 설치된 경우 관련 queue, scheduler, Reverb 등 발견된 서비스를 함께 분류합니다.
 - GnuBoard 5/7 코어를 수정하거나 별도 웹 endpoint를 설치하지 않습니다.
 - 임의 shell, SQL, 복원, 삭제, 방화벽 및 SSH 설정 변경은 Telegram에서 제공하지 않습니다.
@@ -36,7 +36,7 @@ sudo g7tg setup
 
 ## 현재 상태
 
-초기 `v0.2.x` 범위는 메뉴형 조회, 서비스 분류, 승인형 재시작, 장애 알림, 대화형 초기설정과 `.deb` 배포입니다. 자동 검증과 실제 VPS 검증은 증명 수준을 분리합니다.
+현재 범위는 메뉴형 조회, 지속 자원압박 경고, 서비스 분류, 승인형 재시작, 웹/TLS 장애 알림, 대화형 초기설정과 `.deb` 배포입니다. 자동 검증과 실제 VPS 검증은 증명 수준을 분리합니다.
 
 - [제품 범위](docs/PRODUCT_SCOPE.md)
 - [아키텍처](docs/ARCHITECTURE.md)

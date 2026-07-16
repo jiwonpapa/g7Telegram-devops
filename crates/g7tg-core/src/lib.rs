@@ -62,6 +62,8 @@ pub struct SystemSnapshot {
     pub uptime_seconds: u64,
     /// 최근 CPU 사용률입니다.
     pub cpu_usage_percent: f32,
+    /// load average 정규화에 사용하는 논리 CPU 수입니다.
+    pub logical_cpu_count: u32,
     /// 1분 load average입니다.
     pub load_one: f64,
     /// 전체 메모리 byte입니다.

@@ -50,6 +50,16 @@ sudo journalctl -u g7tg-agent.service --since today --no-pager
 sudo g7tg doctor
 ```
 
+`doctor`는 실제 적용 중인 감시 주기와 임계값을 함께 출력합니다. 기본값은 60초마다 검사하고 같은 문제가 2회 연속 관측될 때 알림을 확정합니다.
+
+- CPU 사용률 90% 이상
+- 논리 CPU 한 개당 1분 Load Average 1.5 이상
+- 메모리 사용률 90% 이상
+- 메모리 경고와 Swap 사용률 80% 이상이 동시에 발생한 압박 상태
+- 디스크 사용률 85% 이상, 95% 이상은 치명 등급
+
+CPU 순간 스파이크와 오래된 Swap 페이지만으로는 알림을 보내지 않습니다. 임계값은 `/etc/g7telegram-devops/agent.toml`에서 조정합니다.
+
 ## 추가 연결코드
 
 owner가 아직 등록되지 않은 경우 Agent 사용자 권한으로 발급합니다.

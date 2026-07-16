@@ -14,7 +14,10 @@ approval_ttl_seconds = 45
 
 monitor_interval_seconds = 60
 incident_confirmation_count = 2
+cpu_warning_percent = 90.0
+load_warning_per_cpu = 1.5
 memory_warning_percent = 90.0
+swap_warning_percent = 80.0
 disk_warning_percent = 85.0
 
 # 본문은 검사하지 않습니다. status, latency, TLS 유효기간만 확인합니다.

@@ -44,9 +44,18 @@ pub struct AgentConfig {
     /// 동일 문제를 장애로 확정할 연속 횟수입니다.
     #[serde(default = "default_confirmation_count")]
     pub incident_confirmation_count: u32,
+    /// CPU 사용률 경고 기준입니다.
+    #[serde(default = "default_cpu_warning_percent")]
+    pub cpu_warning_percent: f64,
+    /// 논리 CPU 한 개당 1분 load average 경고 기준입니다.
+    #[serde(default = "default_load_warning_per_cpu")]
+    pub load_warning_per_cpu: f64,
     /// 메모리 사용률 경고 기준입니다.
     #[serde(default = "default_memory_warning_percent")]
     pub memory_warning_percent: f64,
+    /// 메모리 경고가 함께 발생할 때 적용할 swap 사용률 경고 기준입니다.
+    #[serde(default = "default_swap_warning_percent")]
+    pub swap_warning_percent: f64,
     /// 디스크 사용률 경고 기준입니다.
     #[serde(default = "default_disk_warning_percent")]
     pub disk_warning_percent: f64,
@@ -144,8 +153,20 @@ impl AgentConfig {
             "incident_confirmation_count는 1~5여야 합니다"
         );
         ensure!(
+            (50.0..=99.0).contains(&self.cpu_warning_percent),
+            "cpu_warning_percent는 50~99여야 합니다"
+        );
+        ensure!(
+            (0.5..=10.0).contains(&self.load_warning_per_cpu),
+            "load_warning_per_cpu는 0.5~10이어야 합니다"
+        );
+        ensure!(
             (50.0..=99.0).contains(&self.memory_warning_percent),
             "memory_warning_percent는 50~99여야 합니다"
+        );
+        ensure!(
+            (50.0..=99.0).contains(&self.swap_warning_percent),
+            "swap_warning_percent는 50~99여야 합니다"
         );
         ensure!(
             (50.0..=99.0).contains(&self.disk_warning_percent),
@@ -227,8 +248,20 @@ const fn default_confirmation_count() -> u32 {
     2
 }
 
+const fn default_cpu_warning_percent() -> f64 {
+    90.0
+}
+
+const fn default_load_warning_per_cpu() -> f64 {
+    1.5
+}
+
 const fn default_memory_warning_percent() -> f64 {
     90.0
+}
+
+const fn default_swap_warning_percent() -> f64 {
+    80.0
 }
 
 const fn default_disk_warning_percent() -> f64 {
@@ -268,6 +301,21 @@ unexpected = true
     }
 
     #[test]
+    fn pressure_thresholds_default_for_existing_configs() -> anyhow::Result<()> {
+        let config = toml::from_str::<AgentConfig>(
+            r#"
+server_name = "demo"
+bot_token_file = "/run/credentials/token"
+"#,
+        )?;
+        assert_eq!(config.cpu_warning_percent, 90.0);
+        assert_eq!(config.load_warning_per_cpu, 1.5);
+        assert_eq!(config.memory_warning_percent, 90.0);
+        assert_eq!(config.swap_warning_percent, 80.0);
+        config.validate()
+    }
+
+    #[test]
     fn relative_secret_path_is_rejected() {
         let config = AgentConfig {
             server_name: "demo".to_owned(),
@@ -282,7 +330,10 @@ unexpected = true
             web_checks: Vec::new(),
             monitor_interval_seconds: 60,
             incident_confirmation_count: 2,
+            cpu_warning_percent: 90.0,
+            load_warning_per_cpu: 1.5,
             memory_warning_percent: 90.0,
+            swap_warning_percent: 80.0,
             disk_warning_percent: 85.0,
         };
         assert!(config.validate().is_err());

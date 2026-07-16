@@ -96,6 +96,18 @@ async fn main() -> anyhow::Result<()> {
                 "PASS: configuration for {} ({owner_state})",
                 config.server_name
             );
+            println!(
+                "Monitoring: {}s interval, {} consecutive confirmations",
+                config.monitor_interval_seconds, config.incident_confirmation_count
+            );
+            println!(
+                "Thresholds: CPU {:.1}%, Load {:.2}/CPU, Memory {:.1}%, Swap {:.1}% with memory pressure, Disk {:.1}%",
+                config.cpu_warning_percent,
+                config.load_warning_per_cpu,
+                config.memory_warning_percent,
+                config.swap_warning_percent,
+                config.disk_warning_percent
+            );
             Ok(())
         }
         Command::Pair { ttl_seconds } => {

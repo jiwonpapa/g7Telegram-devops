@@ -26,6 +26,9 @@ pub fn collect(server_name: &str) -> SystemSnapshot {
         kernel_version: System::kernel_version().unwrap_or_else(|| "unknown".to_owned()),
         uptime_seconds: System::uptime(),
         cpu_usage_percent: system.global_cpu_usage(),
+        logical_cpu_count: u32::try_from(system.cpus().len())
+            .unwrap_or(u32::MAX)
+            .max(1),
         load_one: load.one,
         memory_total_bytes: system.total_memory(),
         memory_used_bytes: system.used_memory(),

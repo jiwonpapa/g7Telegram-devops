@@ -12,12 +12,14 @@ jobs:
   deb:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.96.0
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.1
+        with:
+          cache-targets: false
       - name: Install cargo-deb
         run: cargo install cargo-deb --version 3.7.0 --locked
       - name: Validate source

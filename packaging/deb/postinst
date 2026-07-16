@@ -1,0 +1,24 @@
+#!/bin/sh
+set -eu
+
+if ! /usr/bin/getent passwd g7tg-agent >/dev/null 2>&1; then
+    /usr/sbin/useradd \
+        --system \
+        --user-group \
+        --home-dir /var/lib/g7telegram-devops \
+        --shell /usr/sbin/nologin \
+        g7tg-agent
+fi
+
+/usr/bin/install -d -o root -g g7tg-agent -m 0750 /etc/g7telegram-devops
+/usr/bin/install -d -o root -g root -m 0700 /etc/g7telegram-devops/secrets
+/usr/bin/install -d -o g7tg-agent -g g7tg-agent -m 0750 /var/lib/g7telegram-devops
+/usr/bin/chown root:g7tg-agent /etc/g7telegram-devops/agent.toml
+/usr/bin/chmod 0640 /etc/g7telegram-devops/agent.toml
+/usr/bin/chown root:root /etc/g7telegram-devops/allowed-units
+/usr/bin/chmod 0644 /etc/g7telegram-devops/allowed-units
+/usr/sbin/visudo -c -f /etc/sudoers.d/g7telegram-devops >/dev/null
+/usr/bin/systemctl daemon-reload >/dev/null 2>&1 || true
+
+echo "Run: sudo g7tg setup --server-name <name>"
+

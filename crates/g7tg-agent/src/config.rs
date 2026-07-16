@@ -3,11 +3,11 @@
 use std::{fs, path::Path};
 
 use anyhow::{Context, ensure};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use url::Url;
 
 /// Agent의 정적 설정입니다.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentConfig {
     /// Telegram에 표시할 서버 이름입니다.
@@ -53,7 +53,7 @@ pub struct AgentConfig {
 }
 
 /// 공개 웹 endpoint의 최소 검사 설정입니다.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct WebCheckConfig {
     /// Telegram 화면과 incident key에 쓰는 이름입니다.
@@ -79,6 +79,11 @@ impl AgentConfig {
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         let body = fs::read_to_string(path).context("설정 파일 read 실패")?;
         toml::from_str(&body).context("설정 TOML parse 실패")
+    }
+
+    /// 현재 설정을 pretty TOML로 serialize합니다.
+    pub fn to_toml(&self) -> anyhow::Result<String> {
+        toml::to_string_pretty(self).context("설정 TOML serialize 실패")
     }
 
     /// 운영 가능한 최소 불변조건을 확인합니다.

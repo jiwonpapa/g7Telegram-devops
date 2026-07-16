@@ -22,6 +22,13 @@ Ubuntu VPS 한 대와 Telegram Bot 한 개를 직접 연결하는 로컬 우선 
 
 정식 산출물은 GitHub Release의 `.deb`입니다. 설치 스크립트는 Release에서 `.deb`와 checksum을 내려받아 검증한 뒤 `apt`로 설치합니다. 서버에서는 Rust를 빌드하지 않습니다.
 
+```bash
+curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7Telegram-devops/main/scripts/install.sh | sudo sh
+sudo g7tg setup --server-name my-vps
+```
+
+`setup`은 Bot token을 화면에 표시하지 않는 대화형 입력으로 받고, 발견한 관리 대상 서비스를 exact allowlist로 저장한 뒤 Telegram 연결코드를 출력합니다.
+
 ## 개발 상태
 
 현재는 단계별 구축 중입니다. 상세 범위와 완료 조건은 다음 문서를 기준으로 합니다.
@@ -30,6 +37,7 @@ Ubuntu VPS 한 대와 Telegram Bot 한 개를 직접 연결하는 로컬 우선 
 - [아키텍처](docs/ARCHITECTURE.md)
 - [단계별 구현계획](docs/IMPLEMENTATION_PLAN.md)
 - [보안 경계](docs/SECURITY.md)
+- [설치와 운영](docs/OPERATIONS.md)
 
 ## 로컬 개발
 
@@ -38,4 +46,3 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
-

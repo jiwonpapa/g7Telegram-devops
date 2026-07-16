@@ -12,6 +12,7 @@ mod menu;
 mod monitor;
 mod runtime;
 mod services;
+mod setup;
 mod storage;
 mod system;
 mod telegram;
@@ -44,6 +45,21 @@ enum Command {
         #[arg(long, default_value_t = 300)]
         ttl_seconds: u64,
     },
+    /// Bot token·서버 이름·서비스 allowlist·systemd를 대화형 설정합니다.
+    Setup {
+        /// Telegram 화면에 표시할 서버 이름입니다.
+        #[arg(long)]
+        server_name: Option<String>,
+        /// systemd LoadCredential이 읽을 root 전용 원본입니다.
+        #[arg(long, default_value = "/etc/g7telegram-devops/secrets/bot-token")]
+        secret_file: PathBuf,
+        /// 설정만 하고 systemd 서비스를 시작하지 않습니다.
+        #[arg(long)]
+        no_start: bool,
+        /// 최초 연결코드 유효시간입니다.
+        #[arg(long, default_value_t = 300)]
+        pairing_ttl_seconds: u64,
+    },
 }
 
 #[tokio::main]
@@ -56,7 +72,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let cli = Cli::parse();
-    let config = config::AgentConfig::load(&cli.config)
+    let mut config = config::AgentConfig::load(&cli.config)
         .with_context(|| format!("설정 파일을 읽지 못했습니다: {}", cli.config.display()))?;
 
     match cli.command {
@@ -90,6 +106,22 @@ async fn main() -> anyhow::Result<()> {
             println!("Telegram에서 다음 연결 코드를 보내십시오: {code}");
             println!("유효시간: {ttl_seconds}초");
             Ok(())
+        }
+        Command::Setup {
+            server_name,
+            secret_file,
+            no_start,
+            pairing_ttl_seconds,
+        } => {
+            setup::run(
+                &cli.config,
+                &mut config,
+                server_name.as_deref(),
+                &secret_file,
+                no_start,
+                pairing_ttl_seconds,
+            )
+            .await
         }
     }
 }

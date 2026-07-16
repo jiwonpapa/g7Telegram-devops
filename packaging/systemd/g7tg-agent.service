@@ -1,0 +1,37 @@
+[Unit]
+Description=G7Telegram DevOps one-to-one VPS agent
+Documentation=https://github.com/jiwonpapa/g7Telegram-devops
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=g7tg-agent
+Group=g7tg-agent
+ExecStart=/usr/bin/g7tg --config /etc/g7telegram-devops/agent.toml run
+LoadCredential=bot-token:/etc/g7telegram-devops/secrets/bot-token
+StateDirectory=g7telegram-devops
+StateDirectoryMode=0750
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadWritePaths=/var/lib/g7telegram-devops
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20s
+
+[Install]
+WantedBy=multi-user.target
+

@@ -289,7 +289,7 @@ struct AnswerCallbackRequest<'a> {
     text: &'a str,
 }
 
-fn validate_token_shape(token: &str) -> anyhow::Result<()> {
+pub(crate) fn validate_token_shape(token: &str) -> anyhow::Result<()> {
     ensure!(
         (20..=256).contains(&token.len()),
         "Bot token 형식이 올바르지 않습니다"

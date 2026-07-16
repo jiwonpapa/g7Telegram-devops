@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+
+/usr/bin/systemctl daemon-reload >/dev/null 2>&1 || true
+
+if [ "${1:-}" = purge ]; then
+    /usr/bin/rm -rf /var/lib/g7telegram-devops
+    /usr/bin/rm -rf /etc/g7telegram-devops/secrets
+    /usr/sbin/userdel g7tg-agent >/dev/null 2>&1 || true
+fi
+

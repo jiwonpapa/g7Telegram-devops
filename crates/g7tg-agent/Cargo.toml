@@ -1,5 +1,6 @@
 [package]
 name = "g7tg-agent"
+description = "Menu-driven one-to-one Telegram agent for Ubuntu web server operations"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -14,6 +15,7 @@ anyhow.workspace = true
 clap.workspace = true
 g7tg-core = { path = "../g7tg-core" }
 reqwest.workspace = true
+rpassword.workspace = true
 rustls.workspace = true
 rusqlite.workspace = true
 secrecy.workspace = true
@@ -38,3 +40,25 @@ tempfile.workspace = true
 
 [lints]
 workspace = true
+
+[package.metadata.deb]
+name = "g7telegram-devops"
+maintainer = "G7Telegram DevOps Contributors"
+copyright = "2026, G7Telegram DevOps Contributors"
+section = "admin"
+priority = "optional"
+depends = "systemd, sudo, ca-certificates"
+extended-description = "Menu-driven one-to-one Telegram agent for Ubuntu web server monitoring and approved service restarts."
+maintainer-scripts = "../../packaging/deb"
+conf-files = [
+    "/etc/g7telegram-devops/agent.toml",
+    "/etc/g7telegram-devops/allowed-units",
+]
+assets = [
+    ["target/release/g7tg", "usr/bin/g7tg", "755"],
+    ["../../config/agent.example.toml", "etc/g7telegram-devops/agent.toml", "640"],
+    ["../../packaging/config/allowed-units", "etc/g7telegram-devops/allowed-units", "644"],
+    ["../../packaging/libexec/g7tg-exec", "usr/lib/g7telegram-devops/g7tg-exec", "755"],
+    ["../../packaging/systemd/g7tg-agent.service", "usr/lib/systemd/system/g7tg-agent.service", "644"],
+    ["../../packaging/sudoers/g7telegram-devops", "etc/sudoers.d/g7telegram-devops", "440"],
+]

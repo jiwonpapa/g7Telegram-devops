@@ -35,5 +35,10 @@ done
 [ "$(/usr/bin/stat -c %a "$root/etc/sudoers.d/g7telegram-devops")" = 440 ]
 /usr/sbin/visudo -c -f "$root/etc/sudoers.d/g7telegram-devops" >/dev/null
 
-echo "PASS: package structure and permissions"
+service="$root/usr/lib/systemd/system/g7tg-agent.service"
+/usr/bin/grep -F -x -q \
+    'CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_AUDIT_WRITE' \
+    "$service"
+/usr/bin/grep -F -x -q 'AmbientCapabilities=' "$service"
 
+echo "PASS: package structure and permissions"

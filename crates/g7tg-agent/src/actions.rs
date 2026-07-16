@@ -50,8 +50,17 @@ pub async fn execute(executor: &str, action: ServiceAction, unit: &str) -> anyho
     .map_err(|_| anyhow!("서비스 {} timeout", action.label()))?
     .context("서비스 action executor 실행 실패")?;
     if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let detail = stderr.trim();
+        if detail.is_empty() {
+            return Err(anyhow!(
+                "서비스 {} 실패: exit={}",
+                action.label(),
+                output.status
+            ));
+        }
         return Err(anyhow!(
-            "서비스 {} 실패: exit={}",
+            "서비스 {} 실패: exit={}, detail={detail}",
             action.label(),
             output.status
         ));

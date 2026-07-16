@@ -23,6 +23,9 @@ trap '/usr/bin/rm -f "$metrics" "$output"' EXIT HUP INT TERM
     --config /etc/g7telegram-devops/agent.toml doctor \
     >"$output" 2>"$metrics"
 /usr/bin/grep -F -q 'PASS: configuration for my-vps (not-paired)' "$output"
+/usr/bin/grep -F -q \
+    'Thresholds: CPU 90.0%, Load 1.50/CPU, Memory 90.0%, Swap 80.0% with memory pressure, Disk 85.0%' \
+    "$output"
 
 rss_kib=$(/usr/bin/awk '/Maximum resident set size/ {print $NF}' "$metrics")
 [ -n "$rss_kib" ]

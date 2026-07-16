@@ -35,6 +35,17 @@ done
 [ "$(/usr/bin/stat -c %a "$root/etc/sudoers.d/g7telegram-devops")" = 440 ]
 /usr/sbin/visudo -c -f "$root/etc/sudoers.d/g7telegram-devops" >/dev/null
 
+config="$root/etc/g7telegram-devops/agent.toml"
+for threshold in \
+    'cpu_warning_percent = 90.0' \
+    'load_warning_per_cpu = 1.5' \
+    'memory_warning_percent = 90.0' \
+    'swap_warning_percent = 80.0' \
+    'disk_warning_percent = 85.0'
+do
+    /usr/bin/grep -F -x -q "$threshold" "$config"
+done
+
 service="$root/usr/lib/systemd/system/g7tg-agent.service"
 /usr/bin/grep -F -x -q \
     'CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_AUDIT_WRITE' \

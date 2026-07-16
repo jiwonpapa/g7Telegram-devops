@@ -10,7 +10,10 @@ permissions:
 
 jobs:
   rust:
-    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -22,3 +25,40 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
 
+  package:
+    runs-on: ubuntu-22.04
+    needs: rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.96.0
+      - uses: Swatinem/rust-cache@v2
+      - name: Validate shell and workflow files
+        run: |
+          shellcheck scripts/*.sh packaging/deb/* packaging/libexec/*
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          "$(go env GOPATH)/bin/actionlint"
+      - name: Build Debian package
+        run: |
+          cargo install cargo-deb --version 3.7.0 --locked
+          cargo deb -p g7tg-agent
+          mkdir -p dist
+          package="$(find target/debian -maxdepth 1 -name 'g7telegram-devops_*_amd64.deb' -print -quit)"
+          test -n "$package"
+          cp "$package" dist/g7telegram-devops.deb
+          scripts/check-package.sh dist/g7telegram-devops.deb
+      - name: Ubuntu 22.04 package smoke under 2GB
+        run: |
+          docker run --rm --memory=2g \
+            -v "$PWD/dist:/dist:ro" \
+            -v "$PWD/scripts:/workspace-scripts:ro" \
+            ubuntu:22.04 \
+            /workspace-scripts/container-smoke.sh /dist/g7telegram-devops.deb
+      - name: Ubuntu 24.04 package smoke under 2GB
+        run: |
+          docker run --rm --memory=2g \
+            -v "$PWD/dist:/dist:ro" \
+            -v "$PWD/scripts:/workspace-scripts:ro" \
+            ubuntu:24.04 \
+            /workspace-scripts/container-smoke.sh /dist/g7telegram-devops.deb

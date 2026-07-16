@@ -16,9 +16,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.96.0
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-deb
-        run: cargo install cargo-deb --locked
+        run: cargo install cargo-deb --version 3.7.0 --locked
+      - name: Validate source
+        run: scripts/check.sh
       - name: Build package
         run: |
           crate_version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "g7tg-agent") | .version')"
@@ -29,8 +32,19 @@ jobs:
           package="$(find target/debian -maxdepth 1 -name '*.deb' -print -quit)"
           test -n "$package"
           cp "$package" "dist/g7telegram-devops_${version}_amd64.deb"
+          scripts/check-package.sh "dist/g7telegram-devops_${version}_amd64.deb"
           cd dist
-          sha256sum *.deb > SHA256SUMS
+          sha256sum -- *.deb > SHA256SUMS
+      - name: Ubuntu package smoke under 2GB
+        run: |
+          for ubuntu in 22.04 24.04; do
+            docker run --rm --memory=2g \
+              -v "$PWD/dist:/dist:ro" \
+              -v "$PWD/scripts:/workspace-scripts:ro" \
+              "ubuntu:$ubuntu" \
+              /workspace-scripts/container-smoke.sh \
+              "/dist/g7telegram-devops_${GITHUB_REF_NAME#v}_amd64.deb"
+          done
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}

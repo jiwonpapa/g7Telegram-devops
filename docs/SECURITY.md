@@ -19,7 +19,7 @@
 - unit ID는 root 소유 allowlist와 발견된 unit을 교차 검증합니다.
 - callback 승인은 owner, action, unit, nonce, expiry에 묶습니다.
 - 동일 callback은 한 번만 소비합니다.
-- restart/reload 뒤 systemd 상태를 다시 읽어 결과를 판정합니다.
+- restart 뒤 systemd 상태를 다시 읽어 결과를 판정합니다.
 
 ## Telegram에서 금지하는 작업
 
@@ -27,4 +27,3 @@
 - 방화벽, SSH, 사용자 계정 변경
 - 파일 편집·다운로드, 비밀값 출력
 - OS 전체 업데이트와 Agent 자체 업데이트
-

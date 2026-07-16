@@ -50,9 +50,6 @@ enum Command {
         /// Telegram 화면에 표시할 서버 이름입니다.
         #[arg(long)]
         server_name: Option<String>,
-        /// systemd LoadCredential이 읽을 root 전용 원본입니다.
-        #[arg(long, default_value = "/etc/g7telegram-devops/secrets/bot-token")]
-        secret_file: PathBuf,
         /// 설정만 하고 systemd 서비스를 시작하지 않습니다.
         #[arg(long)]
         no_start: bool,
@@ -109,7 +106,6 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Setup {
             server_name,
-            secret_file,
             no_start,
             pairing_ttl_seconds,
         } => {
@@ -117,7 +113,6 @@ async fn main() -> anyhow::Result<()> {
                 &cli.config,
                 &mut config,
                 server_name.as_deref(),
-                &secret_file,
                 no_start,
                 pairing_ttl_seconds,
             )

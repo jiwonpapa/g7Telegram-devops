@@ -12,6 +12,7 @@ if [ ! -r /etc/os-release ]; then
     echo "Ubuntu 22.04 or newer is required" >&2
     exit 1
 fi
+# shellcheck disable=SC1091
 . /etc/os-release
 major=${VERSION_ID%%.*}
 if [ "${ID:-}" != ubuntu ] || [ "$major" -lt 22 ]; then
@@ -35,6 +36,11 @@ else
     tag=${latest_url##*/}
 fi
 version=${tag#v}
+/usr/bin/printf '%s\n' "$version" \
+    | /usr/bin/grep -E -q '^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$' || {
+    echo "Invalid release version: $version" >&2
+    exit 1
+}
 asset="g7telegram-devops_${version}_${architecture}.deb"
 base="https://github.com/$REPOSITORY/releases/download/$tag"
 temporary=$(/usr/bin/mktemp -d)
@@ -44,11 +50,12 @@ trap '/usr/bin/rm -rf "$temporary"' EXIT HUP INT TERM
 /usr/bin/curl -fL "$base/SHA256SUMS" -o "$temporary/SHA256SUMS"
 (
     cd "$temporary"
-    /usr/bin/grep -F "  $asset" SHA256SUMS > SHA256SUMS.selected
+    /usr/bin/awk -v asset="$asset" '$2 == asset { print }' \
+        SHA256SUMS > SHA256SUMS.selected
+    [ "$(/usr/bin/wc -l < SHA256SUMS.selected)" -eq 1 ]
     /usr/bin/sha256sum -c SHA256SUMS.selected
 )
 /usr/bin/apt-get install -y "$temporary/$asset"
 
 echo "Installed $asset"
 echo "Next: sudo g7tg setup --server-name <name>"
-

@@ -29,20 +29,19 @@ sudo g7tg setup --server-name my-vps
 
 `setup`은 Bot token을 화면에 표시하지 않는 대화형 입력으로 받고, 발견한 관리 대상 서비스를 exact allowlist로 저장한 뒤 Telegram 연결코드를 출력합니다.
 
-## 개발 상태
+## 현재 상태
 
-현재는 단계별 구축 중입니다. 상세 범위와 완료 조건은 다음 문서를 기준으로 합니다.
+초기 `v0.1.x` 범위는 메뉴형 조회, 서비스 분류, 승인형 재시작, 장애 알림과 `.deb` 배포입니다. 자동 검증과 실제 VPS 검증은 증명 수준을 분리합니다.
 
 - [제품 범위](docs/PRODUCT_SCOPE.md)
 - [아키텍처](docs/ARCHITECTURE.md)
 - [단계별 구현계획](docs/IMPLEMENTATION_PLAN.md)
 - [보안 경계](docs/SECURITY.md)
 - [설치와 운영](docs/OPERATIONS.md)
+- [검증 기준](docs/VERIFICATION.md)
 
 ## 로컬 개발
 
 ```bash
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+scripts/check.sh
 ```

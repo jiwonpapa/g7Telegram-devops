@@ -14,13 +14,13 @@ use uuid::Uuid;
 use crate::{config::AgentConfig, services, storage::Store, telegram::validate_token_shape};
 
 const ALLOWLIST_PATH: &str = "/etc/g7telegram-devops/allowed-units";
+const SECRET_PATH: &str = "/etc/g7telegram-devops/secrets/bot-token";
 
 /// 비밀값과 안전한 자동 탐지 결과를 원자 저장하고 service를 시작합니다.
 pub async fn run(
     config_path: &Path,
     config: &mut AgentConfig,
     server_name: Option<&str>,
-    secret_file: &Path,
     no_start: bool,
     pairing_ttl_seconds: u64,
 ) -> anyhow::Result<()> {
@@ -43,7 +43,7 @@ pub async fn run(
     let token =
         rpassword::prompt_password("Telegram Bot token: ").context("Bot token 입력 실패")?;
     validate_token_shape(token.trim())?;
-    write_secret(secret_file, token.trim())?;
+    write_secret(Path::new(SECRET_PATH), token.trim())?;
 
     let discovered = services::discover(&config.extra_service_units).await?;
     let mut units: Vec<_> = discovered

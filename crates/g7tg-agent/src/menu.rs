@@ -396,9 +396,11 @@ fn format_uptime(seconds: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use g7tg_core::{DiskSnapshot, Menu, SystemSnapshot};
+    use g7tg_core::{
+        DiskSnapshot, Menu, ServiceAction, ServiceCategory, ServiceStatus, SystemSnapshot,
+    };
 
-    use super::render;
+    use super::{render, render_action_confirmation, render_service_detail};
 
     #[test]
     fn system_menu_has_refresh_and_back() {
@@ -423,5 +425,43 @@ mod tests {
         let view = render(Menu::System, Some(&snapshot));
         assert!(view.text.contains("메모리: 1.0 GiB / 2.0 GiB (50.0%)"));
         assert_eq!(view.keyboard.inline_keyboard[0].len(), 2);
+    }
+
+    #[test]
+    fn action_callbacks_fit_telegram_limit_and_include_cancel() {
+        let service = ServiceStatus {
+            unit: "g7-reverb.service".to_owned(),
+            description: "G7 Reverb".to_owned(),
+            category: ServiceCategory::Application,
+            load_state: "loaded".to_owned(),
+            active_state: "active".to_owned(),
+            sub_state: "running".to_owned(),
+        };
+        let detail = render_service_detail(&service, true);
+        let plan = &detail.keyboard.inline_keyboard[0][0].callback_data;
+        assert!(plan.starts_with("action:plan:restart:"));
+        assert!(plan.len() <= 64);
+
+        let confirmation = render_action_confirmation(
+            &service,
+            ServiceAction::Restart,
+            "0123456789abcdef0123456789abcdef",
+            45,
+        );
+        let callbacks: Vec<_> = confirmation.keyboard.inline_keyboard[0]
+            .iter()
+            .map(|button| button.callback_data.as_str())
+            .collect();
+        assert!(callbacks.iter().all(|callback| callback.len() <= 64));
+        assert!(
+            callbacks
+                .iter()
+                .any(|callback| callback.starts_with("action:confirm:"))
+        );
+        assert!(
+            callbacks
+                .iter()
+                .any(|callback| callback.starts_with("action:cancel:"))
+        );
     }
 }

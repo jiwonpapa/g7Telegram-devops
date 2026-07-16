@@ -27,7 +27,7 @@
 ## 배치 3 — 안전한 원격조치
 
 - root-owned unit allowlist
-- restart/reload 계획과 단회 승인 token
+- restart 계획과 단회 승인 token
 - 만료, 재전송, 다른 사용자 callback 거부
 - 실행 전후 read-back과 감사로그
 
@@ -52,4 +52,3 @@
 - `VPS_PASS`: Ubuntu 22.04/24.04 2GB VPS
 - 일반 웹서버와 G7 관련 서비스 표면 각각 검증
 - RSS, idle CPU, SQLite 크기 gate
-

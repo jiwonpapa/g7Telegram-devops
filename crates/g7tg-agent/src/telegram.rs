@@ -313,12 +313,73 @@ pub(crate) fn validate_token_shape(token: &str) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_token_shape;
+    use super::{Update, validate_token_shape};
 
     #[test]
     fn bot_token_shape_is_fail_closed() {
         assert!(validate_token_shape("123456789:ABCdef_123456789-xyz").is_ok());
         assert!(validate_token_shape("not-a-token").is_err());
         assert!(validate_token_shape("123:../../secret").is_err());
+    }
+
+    #[test]
+    fn telegram_message_fixture_keeps_numeric_identity_and_chat_type() -> anyhow::Result<()> {
+        let update: Update = serde_json::from_str(
+            r#"{
+                "update_id": 10001,
+                "message": {
+                    "message_id": 51,
+                    "from": {"id": 987654321, "is_bot": false, "first_name": "Owner"},
+                    "chat": {"id": 987654321, "type": "private"},
+                    "text": "메뉴"
+                }
+            }"#,
+        )?;
+        let message = update
+            .message
+            .ok_or_else(|| anyhow::anyhow!("message fixture 누락"))?;
+        assert_eq!(update.update_id, 10001);
+        assert_eq!(message.chat.kind, "private");
+        assert_eq!(
+            message
+                .from
+                .ok_or_else(|| anyhow::anyhow!("sender fixture 누락"))?
+                .id,
+            987654321
+        );
+        assert_eq!(message.text.as_deref(), Some("메뉴"));
+        Ok(())
+    }
+
+    #[test]
+    fn telegram_callback_fixture_preserves_actor_and_payload() -> anyhow::Result<()> {
+        let update: Update = serde_json::from_str(
+            r#"{
+                "update_id": 10002,
+                "callback_query": {
+                    "id": "callback-1",
+                    "from": {"id": 987654321, "is_bot": false, "first_name": "Owner"},
+                    "message": {
+                        "message_id": 52,
+                        "chat": {"id": 987654321, "type": "private"}
+                    },
+                    "data": "menu:services"
+                }
+            }"#,
+        )?;
+        let callback = update
+            .callback_query
+            .ok_or_else(|| anyhow::anyhow!("callback fixture 누락"))?;
+        assert_eq!(callback.from.id, 987654321);
+        assert_eq!(callback.data.as_deref(), Some("menu:services"));
+        assert_eq!(
+            callback
+                .message
+                .ok_or_else(|| anyhow::anyhow!("callback message fixture 누락"))?
+                .chat
+                .kind,
+            "private"
+        );
+        Ok(())
     }
 }

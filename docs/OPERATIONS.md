@@ -50,6 +50,21 @@ sudo -u g7tg-agent /usr/bin/g7tg \
 sudo g7tg setup --server-name my-vps
 ```
 
+## 업데이트와 롤백
+
+같은 설치 명령을 다시 실행하면 최신 Release checksum을 검증해 설치하고, 실행 중인 Agent만 재시작합니다.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7Telegram-devops/main/scripts/install.sh | sudo sh
+```
+
+특정 버전 설치와 롤백은 `VERSION`을 지정합니다. 설정과 SQLite 상태는 유지됩니다.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7Telegram-devops/main/scripts/install.sh \
+  | sudo VERSION=0.1.0 sh
+```
+
 ## 제거
 
 설정과 상태를 남기려면 remove, 모두 제거하려면 purge를 사용합니다.

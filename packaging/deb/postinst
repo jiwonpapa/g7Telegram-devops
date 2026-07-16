@@ -19,6 +19,6 @@ fi
 /usr/bin/chmod 0644 /etc/g7telegram-devops/allowed-units
 /usr/sbin/visudo -c -f /etc/sudoers.d/g7telegram-devops >/dev/null
 /usr/bin/systemctl daemon-reload >/dev/null 2>&1 || true
+/usr/bin/systemctl try-restart g7tg-agent.service >/dev/null 2>&1 || true
 
 echo "Run: sudo g7tg setup --server-name <name>"
-

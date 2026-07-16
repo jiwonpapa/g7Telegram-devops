@@ -25,12 +25,13 @@ sudo g7tg setup
 1. hostname을 기본값으로 서버 이름 입력
 2. 화면에 표시하지 않는 Bot token 입력
 3. Telegram `getMe`로 token과 Bot 계정 검증
-4. token을 root 전용 secret으로 저장
-5. 관리 대상 systemd service 자동 탐지
-6. exact unit allowlist와 45초 재승인형 restart 기능 설정
-7. Agent systemd enable/start
-8. 일회용 Telegram 연결코드 출력
-9. Bot 개인채팅에 코드를 보낸 발신자의 숫자 user/chat ID 자동 저장
+4. 선택형 대표 웹 URL 입력과 HTTP·응답시간·TLS 검사 등록
+5. token을 root 전용 secret으로 저장
+6. 관리 대상 systemd service 자동 탐지
+7. exact unit allowlist와 45초 재승인형 restart 기능 설정
+8. Agent systemd enable/start
+9. 일회용 Telegram 연결코드 출력
+10. Bot 개인채팅에 코드를 보낸 발신자의 숫자 user/chat ID 자동 저장
 
 사용자명이나 수동 입력한 숫자 ID는 신뢰하지 않습니다. Telegram이 전달한 실제 private chat 발신자 ID만 단회 연결코드와 함께 저장합니다. 연결 대기를 생략하려면 `--no-wait-for-pairing`을 사용합니다.
 

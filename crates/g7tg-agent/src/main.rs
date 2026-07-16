@@ -50,6 +50,9 @@ enum Command {
         /// Telegram 화면에 표시할 서버 이름입니다.
         #[arg(long)]
         server_name: Option<String>,
+        /// HTTP 상태·응답시간·TLS를 검사할 대표 웹 URL입니다.
+        #[arg(long)]
+        web_url: Option<String>,
         /// 설정만 하고 systemd 서비스를 시작하지 않습니다.
         #[arg(long)]
         no_start: bool,
@@ -109,6 +112,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Setup {
             server_name,
+            web_url,
             no_start,
             pairing_ttl_seconds,
             no_wait_for_pairing,
@@ -117,6 +121,7 @@ async fn main() -> anyhow::Result<()> {
                 &cli.config,
                 &mut config,
                 server_name.as_deref(),
+                web_url.as_deref(),
                 no_start,
                 pairing_ttl_seconds,
                 no_wait_for_pairing,

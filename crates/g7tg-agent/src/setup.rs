@@ -10,10 +10,11 @@ use std::{
 
 use anyhow::{Context, anyhow, ensure};
 use tokio::process::Command;
+use url::Url;
 use uuid::Uuid;
 
 use crate::{
-    config::AgentConfig,
+    config::{AgentConfig, WebCheckConfig},
     services,
     storage::{Owner, Store},
     telegram::TelegramClient,
@@ -27,6 +28,7 @@ pub async fn run(
     config_path: &Path,
     config: &mut AgentConfig,
     server_name: Option<&str>,
+    web_url: Option<&str>,
     no_start: bool,
     pairing_ttl_seconds: u64,
     no_wait_for_pairing: bool,
@@ -49,6 +51,7 @@ pub async fn run(
         .context("Bot token Telegram 검증 실패")?;
     ensure!(bot.is_bot, "입력한 token이 Telegram Bot 계정이 아닙니다");
     println!("Telegram Bot 확인: {} (ID {})", bot.first_name, bot.id);
+    configure_primary_web_check(config, web_url)?;
     write_secret(Path::new(SECRET_PATH), token.trim())?;
 
     let discovered = services::discover(&config.extra_service_units).await?;
@@ -83,6 +86,11 @@ pub async fn run(
     }
 
     println!("설정 완료: {}", config.server_name);
+    if let Some(check) = config.web_checks.first() {
+        println!("웹 상태 검사: {}", check.url);
+    } else {
+        println!("웹 상태 검사: 미설정");
+    }
     if let Some(pairing_code) = pairing_code {
         println!("Telegram Bot에 다음 연결코드를 보내십시오: {pairing_code}");
         println!("연결코드 유효시간: {pairing_ttl_seconds}초");
@@ -112,6 +120,82 @@ pub async fn run(
         println!("서비스 시작: sudo systemctl enable --now g7tg-agent.service");
     }
     Ok(())
+}
+
+fn configure_primary_web_check(
+    config: &mut AgentConfig,
+    requested_url: Option<&str>,
+) -> anyhow::Result<()> {
+    let existing_url = config.web_checks.first().map(|check| check.url.as_str());
+    let selected = match requested_url {
+        Some(url) => Some(normalized_web_url(url)?),
+        None => prompt_web_url(existing_url)?,
+    };
+    let Some(url) = selected else {
+        return Ok(());
+    };
+    let name = config
+        .web_checks
+        .first()
+        .map_or_else(|| "대표 사이트".to_owned(), |check| check.name.clone());
+    let check = WebCheckConfig {
+        name,
+        url,
+        expected_status_min: 200,
+        expected_status_max: 399,
+        timeout_seconds: 5,
+        tls_warning_days: 14,
+    };
+    if let Some(existing) = config.web_checks.first_mut() {
+        *existing = check;
+    } else {
+        config.web_checks.push(check);
+    }
+    Ok(())
+}
+
+fn prompt_web_url(existing_url: Option<&str>) -> anyhow::Result<Option<String>> {
+    match existing_url {
+        Some(url) => print!("Web status URL (Enter=keep) [{url}]: "),
+        None => print!("Web status URL (optional, Enter=skip): "),
+    }
+    io::stdout().flush().context("web URL prompt 출력 실패")?;
+    let mut input = String::new();
+    io::stdin()
+        .read_line(&mut input)
+        .context("web URL 입력 실패")?;
+    if input.trim().is_empty() {
+        return existing_url.map(normalized_web_url).transpose();
+    }
+    normalized_web_url(&input).map(Some)
+}
+
+fn normalized_web_url(input: &str) -> anyhow::Result<String> {
+    let input = input.trim();
+    ensure!(!input.is_empty(), "web URL이 비어 있습니다");
+    let candidate = if input.contains("://") {
+        input.to_owned()
+    } else {
+        format!("https://{input}")
+    };
+    let mut url = Url::parse(&candidate).context("web URL parse 실패")?;
+    ensure!(
+        matches!(url.scheme(), "http" | "https"),
+        "web URL은 HTTP(S)만 허용합니다"
+    );
+    ensure!(url.host_str().is_some(), "web URL host가 없습니다");
+    ensure!(
+        url.username().is_empty() && url.password().is_none(),
+        "web URL credential을 허용하지 않습니다"
+    );
+    ensure!(
+        url.query().is_none() && url.fragment().is_none(),
+        "web URL query와 fragment를 허용하지 않습니다"
+    );
+    if url.path().is_empty() {
+        url.set_path("/");
+    }
+    Ok(url.to_string())
 }
 
 fn validated_server_name(server_name: &str) -> anyhow::Result<String> {
@@ -245,7 +329,7 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use super::{validated_server_name, wait_for_owner, write_atomic};
+    use super::{normalized_web_url, validated_server_name, wait_for_owner, write_atomic};
     use crate::storage::Store;
 
     #[test]
@@ -264,6 +348,19 @@ mod tests {
         assert!(validated_server_name("\n").is_err());
         assert!(validated_server_name(&"x".repeat(65)).is_err());
         assert!(validated_server_name("web\u{0000}01").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn web_url_defaults_to_https_and_rejects_secrets() -> anyhow::Result<()> {
+        assert_eq!(normalized_web_url("example.com")?, "https://example.com/");
+        assert_eq!(
+            normalized_web_url("http://example.com/health")?,
+            "http://example.com/health"
+        );
+        assert!(normalized_web_url("ftp://example.com/").is_err());
+        assert!(normalized_web_url("https://user:pass@example.com/").is_err());
+        assert!(normalized_web_url("https://example.com/?token=secret").is_err());
         Ok(())
     }
 

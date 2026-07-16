@@ -62,7 +62,7 @@ curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7Telegram-devops/main/sc
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7Telegram-devops/main/scripts/install.sh \
-  | sudo VERSION=0.1.0 sh
+  | sudo G7TG_VERSION=0.1.0 sh
 ```
 
 ## 제거

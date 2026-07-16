@@ -2,6 +2,7 @@
 set -eu
 
 REPOSITORY=jiwonpapa/g7Telegram-devops
+requested_version=${G7TG_VERSION:-}
 
 if [ "$(/usr/bin/id -u)" -ne 0 ]; then
     echo "Run as root: curl ... | sudo sh" >&2
@@ -28,8 +29,8 @@ case "$(/usr/bin/dpkg --print-architecture)" in
         ;;
 esac
 
-if [ -n "${VERSION:-}" ]; then
-    tag=v${VERSION#v}
+if [ -n "$requested_version" ]; then
+    tag=v${requested_version#v}
 else
     latest_url=$(/usr/bin/curl -fsSLI -o /dev/null -w '%{url_effective}' \
         "https://github.com/$REPOSITORY/releases/latest")

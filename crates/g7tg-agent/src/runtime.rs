@@ -347,14 +347,25 @@ async fn handle_callback(
         Menu::Alerts => menu::render_alerts(&store.current_incidents()?, store.silence_until()?),
         _ => menu::render(target_menu, snapshot.as_ref()),
     };
-    telegram
-        .edit_message(
-            message.chat.id,
-            message.message_id,
-            &view.text,
-            view.keyboard,
-        )
-        .await?;
+    if target_menu == Menu::System {
+        telegram
+            .edit_preformatted_message(
+                message.chat.id,
+                message.message_id,
+                &view.text,
+                view.keyboard,
+            )
+            .await?;
+    } else {
+        telegram
+            .edit_message(
+                message.chat.id,
+                message.message_id,
+                &view.text,
+                view.keyboard,
+            )
+            .await?;
+    }
     telegram.answer_callback(&callback.id, "완료").await?;
     Ok(())
 }
@@ -518,13 +529,14 @@ async fn send_new_menu(
         Menu::Alerts => menu::render_alerts(&store.current_incidents()?, store.silence_until()?),
         _ => menu::render(target_menu, snapshot.as_ref()),
     };
-    telegram
-        .send_message(
-            chat_id,
-            &view.text,
-            Some(serde_json::to_value(view.keyboard).context("메뉴 JSON 생성 실패")?),
-        )
-        .await?;
+    let keyboard = Some(serde_json::to_value(view.keyboard).context("메뉴 JSON 생성 실패")?);
+    if target_menu == Menu::System {
+        telegram
+            .send_preformatted_message(chat_id, &view.text, keyboard)
+            .await?;
+    } else {
+        telegram.send_message(chat_id, &view.text, keyboard).await?;
+    }
     Ok(())
 }
 

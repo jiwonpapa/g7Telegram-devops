@@ -464,7 +464,7 @@ dependencies = [
 
 [[package]]
 name = "g7tg-agent"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -494,7 +494,7 @@ dependencies = [
 
 [[package]]
 name = "g7tg-core"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "serde",
 ]

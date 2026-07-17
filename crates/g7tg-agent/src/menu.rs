@@ -301,36 +301,46 @@ fn format_system_snapshot(snapshot: &SystemSnapshot) -> String {
     let memory_percent = percent(snapshot.memory_used_bytes, snapshot.memory_total_bytes);
     let swap_percent = percent(snapshot.swap_used_bytes, snapshot.swap_total_bytes);
     let mut lines = vec![
-        format!("서버 상태 — {}", snapshot.server_name),
-        format!("호스트: {}", snapshot.hostname),
-        format!("OS: {}", snapshot.os_name),
-        format!("Kernel: {}", snapshot.kernel_version),
-        format!("Uptime: {}", format_uptime(snapshot.uptime_seconds)),
         format!(
-            "CPU: {:.1}% · Load: {:.2} / {}CPU",
-            snapshot.cpu_usage_percent, snapshot.load_one, snapshot.logical_cpu_count
+            "[ 서버 상태 · {} ]",
+            compact_text(&snapshot.server_name, 22)
+        ),
+        "------------------------------".to_owned(),
+        format!("CPU    {:>5.1}%", snapshot.cpu_usage_percent),
+        format!(
+            "LOAD   {:>5.2} / {} CPU",
+            snapshot.load_one, snapshot.logical_cpu_count
         ),
         format!(
-            "메모리: {} / {} ({memory_percent:.1}%)",
-            format_bytes(snapshot.memory_used_bytes),
-            format_bytes(snapshot.memory_total_bytes)
+            "RAM    {:>5} / {:<5} {:>5.1}%",
+            format_bytes_compact(snapshot.memory_used_bytes),
+            format_bytes_compact(snapshot.memory_total_bytes),
+            memory_percent
         ),
         format!(
-            "Swap: {} / {} ({swap_percent:.1}%)",
-            format_bytes(snapshot.swap_used_bytes),
-            format_bytes(snapshot.swap_total_bytes)
+            "SWAP   {:>5} / {:<5} {:>5.1}%",
+            format_bytes_compact(snapshot.swap_used_bytes),
+            format_bytes_compact(snapshot.swap_total_bytes),
+            swap_percent
         ),
     ];
     for disk in &snapshot.disks {
         let used = disk.total_bytes.saturating_sub(disk.available_bytes);
         lines.push(format!(
-            "디스크 {}: {} / {} ({:.1}%)",
-            disk.mount_point,
-            format_bytes(used),
-            format_bytes(disk.total_bytes),
+            "DISK {:<5} {:>5} / {:<5} {:>5.1}%",
+            compact_text(&disk.mount_point, 5),
+            format_bytes_compact(used),
+            format_bytes_compact(disk.total_bytes),
             percent(used, disk.total_bytes)
         ));
     }
+    lines.extend([
+        "------------------------------".to_owned(),
+        format!("UP     {}", format_uptime(snapshot.uptime_seconds)),
+        format!("HOST   {}", compact_text(&snapshot.hostname, 32)),
+        format!("OS     {}", compact_text(&snapshot.os_name, 32)),
+        format!("KERN   {}", compact_text(&snapshot.kernel_version, 32)),
+    ]);
     lines.join("\n")
 }
 
@@ -377,13 +387,13 @@ fn percent(used: u64, total: u64) -> f64 {
     }
 }
 
-fn format_bytes(bytes: u64) -> String {
+fn format_bytes_compact(bytes: u64) -> String {
     const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
     const MIB: f64 = 1024.0 * 1024.0;
     if bytes as f64 >= GIB {
-        format!("{:.1} GiB", bytes as f64 / GIB)
+        format!("{:.1}G", bytes as f64 / GIB)
     } else {
-        format!("{:.1} MiB", bytes as f64 / MIB)
+        format!("{:.0}M", bytes as f64 / MIB)
     }
 }
 
@@ -391,7 +401,17 @@ fn format_uptime(seconds: u64) -> String {
     let days = seconds / 86_400;
     let hours = seconds % 86_400 / 3_600;
     let minutes = seconds % 3_600 / 60;
-    format!("{days}일 {hours}시간 {minutes}분")
+    format!("{days}d {hours}h {minutes}m")
+}
+
+fn compact_text(value: &str, max_chars: usize) -> String {
+    let count = value.chars().count();
+    if count <= max_chars {
+        return value.to_owned();
+    }
+    let mut compact: String = value.chars().take(max_chars.saturating_sub(1)).collect();
+    compact.push('~');
+    compact
 }
 
 #[cfg(test)]
@@ -424,7 +444,9 @@ mod tests {
             }],
         };
         let view = render(Menu::System, Some(&snapshot));
-        assert!(view.text.contains("메모리: 1.0 GiB / 2.0 GiB (50.0%)"));
+        assert!(view.text.contains("RAM     1.0G / 2.0G   50.0%"));
+        assert!(view.text.contains("DISK /      5.0G / 10.0G  50.0%"));
+        assert!(view.text.lines().all(|line| line.chars().count() <= 40));
         assert_eq!(view.keyboard.inline_keyboard[0].len(), 2);
     }
 

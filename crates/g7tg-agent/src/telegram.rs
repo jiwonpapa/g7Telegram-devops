@@ -82,6 +82,28 @@ impl TelegramClient {
             &SendMessageRequest {
                 chat_id,
                 text,
+                parse_mode: None,
+                reply_markup,
+            },
+            10,
+        )
+        .await
+    }
+
+    /// 고정폭 HTML `<pre>` 형식으로 새 메시지를 보냅니다.
+    pub async fn send_preformatted_message(
+        &self,
+        chat_id: i64,
+        text: &str,
+        reply_markup: Option<Value>,
+    ) -> anyhow::Result<Message> {
+        let text = preformatted_html(text);
+        self.post(
+            "sendMessage",
+            &SendMessageRequest {
+                chat_id,
+                text: &text,
+                parse_mode: Some("HTML"),
                 reply_markup,
             },
             10,
@@ -103,6 +125,30 @@ impl TelegramClient {
                 chat_id,
                 message_id,
                 text,
+                parse_mode: None,
+                reply_markup,
+            },
+            10,
+        )
+        .await
+    }
+
+    /// 기존 메시지를 고정폭 HTML `<pre>` 형식으로 교체합니다.
+    pub async fn edit_preformatted_message(
+        &self,
+        chat_id: i64,
+        message_id: i64,
+        text: &str,
+        reply_markup: InlineKeyboardMarkup,
+    ) -> anyhow::Result<Message> {
+        let text = preformatted_html(text);
+        self.post(
+            "editMessageText",
+            &EditMessageRequest {
+                chat_id,
+                message_id,
+                text: &text,
+                parse_mode: Some("HTML"),
                 reply_markup,
             },
             10,
@@ -277,6 +323,8 @@ struct SendMessageRequest<'a> {
     chat_id: i64,
     text: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
+    parse_mode: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     reply_markup: Option<Value>,
 }
 
@@ -285,6 +333,8 @@ struct EditMessageRequest<'a> {
     chat_id: i64,
     message_id: i64,
     text: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parse_mode: Option<&'a str>,
     reply_markup: InlineKeyboardMarkup,
 }
 
@@ -292,6 +342,21 @@ struct EditMessageRequest<'a> {
 struct AnswerCallbackRequest<'a> {
     callback_query_id: &'a str,
     text: &'a str,
+}
+
+fn preformatted_html(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len().saturating_add(11));
+    escaped.push_str("<pre>");
+    for character in text.chars() {
+        match character {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            _ => escaped.push(character),
+        }
+    }
+    escaped.push_str("</pre>");
+    escaped
 }
 
 pub(crate) fn validate_token_shape(token: &str) -> anyhow::Result<()> {
@@ -318,7 +383,7 @@ pub(crate) fn validate_token_shape(token: &str) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{TelegramClient, Update, validate_token_shape};
+    use super::{TelegramClient, Update, preformatted_html, validate_token_shape};
 
     #[test]
     fn bot_token_shape_is_fail_closed() {
@@ -330,6 +395,14 @@ mod tests {
     #[test]
     fn client_accepts_trimmed_token_without_exposing_it() {
         assert!(TelegramClient::from_token(" 123456789:ABCdef_123456789-xyz\n").is_ok());
+    }
+
+    #[test]
+    fn preformatted_text_escapes_telegram_html() {
+        assert_eq!(
+            preformatted_html("CPU < 10% & stable"),
+            "<pre>CPU &lt; 10% &amp; stable</pre>"
+        );
     }
 
     #[test]

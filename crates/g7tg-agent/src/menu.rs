@@ -323,18 +323,26 @@ fn format_system_snapshot(snapshot: &SystemSnapshot) -> String {
             format_bytes_compact(snapshot.swap_total_bytes),
             swap_percent
         ),
+        String::new(),
+        "DISK             USED/TOTAL    USE".to_owned(),
     ];
     for disk in &snapshot.disks {
         let used = disk.total_bytes.saturating_sub(disk.available_bytes);
-        lines.push(format!(
-            "DISK {:<5} {:>5} / {:<5} {:>5.1}%",
-            compact_text(&disk.mount_point, 5),
+        let usage = format!(
+            "{:>5}/{:<5} {:>5.1}%",
             format_bytes_compact(used),
             format_bytes_compact(disk.total_bytes),
             percent(used, disk.total_bytes)
-        ));
+        );
+        if disk.mount_point.chars().count() <= 16 {
+            lines.push(format!("{:<16} {usage}", disk.mount_point));
+        } else {
+            lines.extend(wrap_text(&disk.mount_point, 35));
+            lines.push(format!("{usage:>35}"));
+        }
     }
     lines.extend([
+        String::new(),
         "------------------------------".to_owned(),
         format!("UP     {}", format_uptime(snapshot.uptime_seconds)),
         format!("HOST   {}", compact_text(&snapshot.hostname, 32)),
@@ -414,13 +422,24 @@ fn compact_text(value: &str, max_chars: usize) -> String {
     compact
 }
 
+fn wrap_text(value: &str, max_chars: usize) -> Vec<String> {
+    if max_chars == 0 {
+        return vec![String::new()];
+    }
+    let chars: Vec<char> = value.chars().collect();
+    chars
+        .chunks(max_chars)
+        .map(|chunk| chunk.iter().collect())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use g7tg_core::{
         DiskSnapshot, Menu, ServiceAction, ServiceCategory, ServiceStatus, SystemSnapshot,
     };
 
-    use super::{render, render_action_confirmation, render_service_detail};
+    use super::{render, render_action_confirmation, render_service_detail, wrap_text};
 
     #[test]
     fn system_menu_has_refresh_and_back() {
@@ -437,17 +456,39 @@ mod tests {
             memory_used_bytes: 1024 * 1024 * 1024,
             swap_total_bytes: 0,
             swap_used_bytes: 0,
-            disks: vec![DiskSnapshot {
-                mount_point: "/".to_owned(),
-                total_bytes: 10 * 1024 * 1024 * 1024,
-                available_bytes: 5 * 1024 * 1024 * 1024,
-            }],
+            disks: vec![
+                DiskSnapshot {
+                    mount_point: "/".to_owned(),
+                    total_bytes: 10 * 1024 * 1024 * 1024,
+                    available_bytes: 5 * 1024 * 1024 * 1024,
+                },
+                DiskSnapshot {
+                    mount_point: "/boot/efi".to_owned(),
+                    total_bytes: 100 * 1024 * 1024,
+                    available_bytes: 94 * 1024 * 1024,
+                },
+            ],
         };
         let view = render(Menu::System, Some(&snapshot));
         assert!(view.text.contains("RAM     1.0G / 2.0G   50.0%"));
-        assert!(view.text.contains("DISK /      5.0G / 10.0G  50.0%"));
+        assert!(view.text.contains("DISK             USED/TOTAL    USE"));
+        assert!(view.text.contains("/                 5.0G/10.0G  50.0%"));
+        assert!(
+            view.text
+                .lines()
+                .any(|line| line.starts_with("/boot/efi") && line.ends_with("6M/100M    6.0%"))
+        );
+        assert!(!view.text.contains('~'));
         assert!(view.text.lines().all(|line| line.chars().count() <= 40));
         assert_eq!(view.keyboard.inline_keyboard[0].len(), 2);
+    }
+
+    #[test]
+    fn long_mount_paths_wrap_without_losing_characters() {
+        let path = "/var/lib/g7telegram-devops/runtime/monitoring-data";
+        let wrapped = wrap_text(path, 35);
+        assert_eq!(wrapped.concat(), path);
+        assert!(wrapped.iter().all(|line| line.chars().count() <= 35));
     }
 
     #[test]

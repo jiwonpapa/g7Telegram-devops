@@ -8,6 +8,7 @@ After=network-online.target
 Type=simple
 User=g7tg-agent
 Group=g7tg-agent
+UMask=0027
 ExecStart=/usr/bin/g7tg --config /etc/g7telegram-devops/agent.toml run
 LoadCredential=bot-token:/etc/g7telegram-devops/secrets/bot-token
 StateDirectory=g7telegram-devops

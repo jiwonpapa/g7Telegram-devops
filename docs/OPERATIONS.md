@@ -29,7 +29,7 @@ sudo g7tg setup
 5. token을 root 전용 secret으로 저장
 6. 관리 대상 systemd service 자동 탐지
 7. exact unit allowlist와 45초 재승인형 restart 기능 설정
-8. Agent systemd enable/start
+8. Agent systemd enable/restart와 활성 상태 확인
 9. 일회용 Telegram 연결코드 출력
 10. Bot 개인채팅에 코드를 보낸 발신자의 숫자 user/chat ID 자동 저장
 
@@ -69,9 +69,21 @@ sudo -u g7tg-agent /usr/bin/g7tg \
   --config /etc/g7telegram-devops/agent.toml pair
 ```
 
+기존 owner의 Telegram 계정을 잃었거나 교체해야 하면 root가 교체 코드를 발급합니다. 새 owner가 코드를 실제 사용할 때까지 기존 owner는 유지됩니다.
+
+```bash
+sudo g7tg pair --replace
+```
+
+owner 연결을 완전히 제거하려면 명시적 확인 옵션을 사용합니다. 대기 중인 재시작 승인도 함께 제거됩니다.
+
+```bash
+sudo g7tg unpair --confirm
+```
+
 ## Bot token 교체
 
-`setup`을 다시 실행하면 owner와 incident 상태를 유지하면서 token, 서비스 탐지 결과와 설정을 갱신합니다.
+`setup`을 다시 실행하면 owner와 incident 상태를 유지하면서 token, 서비스 탐지 결과와 설정을 갱신하고 Agent를 재시작한 뒤 활성 상태를 확인합니다.
 
 ```bash
 sudo g7tg setup
@@ -79,7 +91,7 @@ sudo g7tg setup
 
 ## 업데이트와 롤백
 
-같은 설치 명령을 다시 실행하면 최신 Release checksum을 검증해 설치하고, 실행 중인 Agent만 재시작합니다.
+같은 설치 명령을 다시 실행하면 최신 Release checksum을 검증해 설치합니다. 설정된 서버에서는 Agent 재시작, `doctor`, 활성 상태 검증까지 통과해야 설치 성공으로 끝납니다.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7Telegram-devops/main/scripts/install.sh | sudo sh
@@ -89,8 +101,15 @@ curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7Telegram-devops/main/sc
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7Telegram-devops/main/scripts/install.sh \
-  | sudo G7TG_VERSION=0.2.0 sh
+  | sudo G7TG_VERSION=0.4.1 sh
 ```
+
+## 알림중지와 데이터 보존
+
+- 알림중지 중 발생·복구한 개별 알림은 지연 전송하지 않습니다.
+- 자동 만료 시 현재 장애만 한 번의 요약으로 전송합니다.
+- 수동 해제 시 이전 대기 알림은 폐기하고 이후 관측부터 정상 전송합니다.
+- 감사로그는 최근 30일·최대 10,000건, 알림 outbox는 최근 7일·최대 1,000건으로 제한합니다.
 
 ## 제거
 

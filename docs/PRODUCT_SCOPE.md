@@ -13,8 +13,8 @@
 - 선택한 서비스의 헬스체크
 - 허용된 서비스 restart 전 영향 안내와 재승인
 - HTTP 응답과 TLS 만료의 최소 외부 검증
-- 장애 중복 제거, 복구 알림, silence
-- SQLite 기반 update cursor, 설정 상태, incident 및 감사로그
+- 장애 중복 제거, 복구 알림, 지연 알림을 남기지 않는 silence 요약
+- SQLite 기반 update cursor, 설정 상태, incident 및 bounded 감사로그
 - Ubuntu 22.04 이상 `.deb` 설치, 업데이트, 제거
 
 ## 제외

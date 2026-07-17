@@ -35,6 +35,7 @@
 
 - 상태 임계값, 연속 실패, dedupe, recovery
 - silence와 bounded incident retention
+- collector별 실패 격리와 silence 종료 요약
 - 설정된 URL의 HTTP status/latency
 - TLS 만료 경고
 
@@ -44,6 +45,7 @@
 - `.deb` package, post-install/pre-remove
 - GitHub Release checksum과 설치 스크립트
 - token rotation, update, rollback, uninstall
+- owner 안전 교체·해제, 설치 후 restart/doctor health gate
 
 ## 배치 6 — 완료 검증
 

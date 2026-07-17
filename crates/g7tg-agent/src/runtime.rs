@@ -15,6 +15,8 @@ use crate::{
     telegram::{CallbackQuery, Message, TelegramClient, Update},
 };
 
+const UPDATE_MAX_ATTEMPTS: u32 = 3;
+
 /// 설정을 검증하고 종료 신호까지 Agent를 실행합니다.
 pub async fn run(config: AgentConfig) -> anyhow::Result<()> {
     let store = Store::open(&config.state_database)?;
@@ -58,8 +60,12 @@ pub async fn run(config: AgentConfig) -> anyhow::Result<()> {
                         .update_id
                         .checked_add(1)
                         .ok_or_else(|| anyhow!("Telegram update_id overflow"))?;
-                    if let Err(error) = handle_update(&config, &store, &telegram, update).await {
-                        tracing::warn!(error = %error, "Telegram update 처리 실패");
+                    if let Err(error) =
+                        handle_update_with_retry(&config, &store, &telegram, update).await
+                    {
+                        tracing::error!(error = %error, "Telegram update 실패기록 저장 실패");
+                        tokio::time::sleep(Duration::from_secs(config.retry_seconds)).await;
+                        break;
                     }
                     store.set_update_offset(next_offset)?;
                     offset = next_offset;
@@ -72,6 +78,57 @@ pub async fn run(config: AgentConfig) -> anyhow::Result<()> {
             }
         }
     }
+}
+
+async fn handle_update_with_retry(
+    config: &AgentConfig,
+    store: &Store,
+    telegram: &TelegramClient,
+    update: Update,
+) -> anyhow::Result<()> {
+    for attempt in 1..=UPDATE_MAX_ATTEMPTS {
+        match handle_update(config, store, telegram, update.clone()).await {
+            Ok(()) => return Ok(()),
+            Err(error) if attempt < UPDATE_MAX_ATTEMPTS => {
+                let delay_seconds = update_retry_delay_seconds(config.retry_seconds, attempt);
+                tracing::warn!(
+                    update_id = update.update_id,
+                    attempt,
+                    delay_seconds,
+                    error = %error,
+                    "Telegram update 재시도"
+                );
+                tokio::time::sleep(Duration::from_secs(delay_seconds)).await;
+            }
+            Err(error) => {
+                let detail = bounded_detail(&format!(
+                    "update_id={};attempts={UPDATE_MAX_ATTEMPTS};error={error}",
+                    update.update_id
+                ));
+                store
+                    .audit(None, "telegram_update_dead_letter", "failed", &detail)
+                    .context("Telegram update 실패기록 저장 실패")?;
+                tracing::error!(
+                    update_id = update.update_id,
+                    attempts = UPDATE_MAX_ATTEMPTS,
+                    error = %error,
+                    "Telegram update를 실패기록으로 이동했습니다"
+                );
+                return Ok(());
+            }
+        }
+    }
+    Err(anyhow!("Telegram update 재시도 상태가 올바르지 않습니다"))
+}
+
+fn update_retry_delay_seconds(base_seconds: u64, attempt: u32) -> u64 {
+    base_seconds
+        .saturating_mul(1_u64 << attempt.saturating_sub(1).min(4))
+        .min(30)
+}
+
+fn bounded_detail(detail: &str) -> String {
+    detail.chars().take(500).collect()
 }
 
 async fn handle_update(
@@ -108,18 +165,19 @@ async fn handle_message(
         return Ok(());
     }
     let text = message.text.as_deref().unwrap_or_default().trim();
+    if store.consume_pairing_code(text, user.id, message.chat.id)? {
+        telegram
+            .send_message(
+                message.chat.id,
+                "연결되었습니다. 아래 메뉴 버튼으로 서버를 관리하세요.",
+                Some(menu::persistent_menu_keyboard()),
+            )
+            .await?;
+        send_new_menu(config, store, telegram, message.chat.id, Menu::Main).await?;
+        return Ok(());
+    }
     let owner = store.owner()?;
     if owner.is_none() {
-        if store.consume_pairing_code(text, user.id, message.chat.id)? {
-            telegram
-                .send_message(
-                    message.chat.id,
-                    "연결되었습니다. 아래 메뉴 버튼으로 서버를 관리하세요.",
-                    Some(menu::persistent_menu_keyboard()),
-                )
-                .await?;
-            send_new_menu(config, store, telegram, message.chat.id, Menu::Main).await?;
-        }
         return Ok(());
     }
     let owner = owner.ok_or_else(|| anyhow!("owner 상태가 사라졌습니다"))?;
@@ -472,4 +530,22 @@ async fn send_new_menu(
 
 fn is_owner(owner: Owner, user_id: i64, chat_id: i64) -> bool {
     owner.user_id == user_id && owner.chat_id == chat_id
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{bounded_detail, update_retry_delay_seconds};
+
+    #[test]
+    fn update_retry_delay_is_bounded() {
+        assert_eq!(update_retry_delay_seconds(2, 1), 2);
+        assert_eq!(update_retry_delay_seconds(2, 2), 4);
+        assert_eq!(update_retry_delay_seconds(20, 3), 30);
+    }
+
+    #[test]
+    fn dead_letter_detail_is_bounded_by_characters() {
+        let detail = bounded_detail(&"가".repeat(700));
+        assert_eq!(detail.chars().count(), 500);
+    }
 }

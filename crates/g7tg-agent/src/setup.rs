@@ -52,7 +52,6 @@ pub async fn run(
     ensure!(bot.is_bot, "입력한 token이 Telegram Bot 계정이 아닙니다");
     println!("Telegram Bot 확인: {} (ID {})", bot.first_name, bot.id);
     configure_primary_web_check(config, web_url)?;
-    write_secret(Path::new(SECRET_PATH), token.trim())?;
 
     let discovered = services::discover(&config.extra_service_units).await?;
     let mut units: Vec<_> = discovered
@@ -79,10 +78,14 @@ pub async fn run(
         None
     };
     set_database_owner(Path::new(&config.state_database))?;
+    write_secret(Path::new(SECRET_PATH), token.trim())?;
 
     if !no_start {
         run_checked("systemctl", &["daemon-reload"]).await?;
-        run_checked("systemctl", &["enable", "--now", "g7tg-agent.service"]).await?;
+        run_checked("systemctl", &["enable", "g7tg-agent.service"]).await?;
+        run_checked("systemctl", &["restart", "g7tg-agent.service"]).await?;
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        run_checked("systemctl", &["is-active", "--quiet", "g7tg-agent.service"]).await?;
     }
 
     println!("설정 완료: {}", config.server_name);

@@ -66,9 +66,7 @@ trap '/usr/bin/rm -rf "$temporary"' EXIT HUP INT TERM
 )
 DEBIAN_FRONTEND=noninteractive /usr/bin/apt-get \
     -o Dpkg::Options::=--force-confold \
-    install -y "$temporary/$asset"
-
-echo "Installed $asset"
+    install -y --allow-downgrades "$temporary/$asset"
 
 run_setup=0
 if [ "$force_setup" = 1 ]; then
@@ -95,3 +93,12 @@ elif [ "$configured" = 1 ]; then
 else
     echo "Next: sudo g7tg setup"
 fi
+
+if [ -s /etc/g7telegram-devops/secrets/bot-token ]; then
+    /usr/sbin/runuser -u g7tg-agent -- \
+        /usr/bin/g7tg --config /etc/g7telegram-devops/agent.toml doctor
+    /usr/bin/systemctl is-active --quiet g7tg-agent.service
+    echo "Agent health: PASS"
+fi
+
+echo "Installed $asset"

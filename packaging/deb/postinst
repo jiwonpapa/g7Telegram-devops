@@ -19,6 +19,12 @@ fi
 /usr/bin/chmod 0644 /etc/g7telegram-devops/allowed-units
 /usr/sbin/visudo -c -f /etc/sudoers.d/g7telegram-devops >/dev/null
 /usr/bin/systemctl daemon-reload >/dev/null 2>&1 || true
-/usr/bin/systemctl try-restart g7tg-agent.service >/dev/null 2>&1 || true
+
+if [ -s /etc/g7telegram-devops/secrets/bot-token ]; then
+    /usr/bin/systemctl enable g7tg-agent.service >/dev/null
+    /usr/bin/systemctl restart g7tg-agent.service
+    /usr/bin/sleep 2
+    /usr/bin/systemctl is-active --quiet g7tg-agent.service
+fi
 
 echo "Run: sudo g7tg setup"

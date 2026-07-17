@@ -5,6 +5,8 @@
 - 개인 채팅만 허용합니다.
 - username이 아닌 64-bit Telegram user ID를 사용합니다.
 - 최초 연결은 SSH에서 발급한 5분 유효 일회용 pairing code로 수행합니다.
+- owner 교체 코드는 root만 발급하며, 새 owner가 사용하기 전까지 기존 owner를 유지합니다.
+- owner 해제는 root와 `--confirm`을 모두 요구하고 대기 중인 작업 승인을 폐기합니다.
 - 미등록 사용자와 group/supergroup/channel update는 처리하지 않습니다.
 
 ## 비밀값
@@ -20,6 +22,7 @@
 - callback 승인은 owner, action, unit, nonce, expiry에 묶습니다.
 - 동일 callback은 한 번만 소비합니다.
 - restart 뒤 systemd 상태를 다시 읽어 결과를 판정합니다.
+- Telegram 처리 오류는 최대 3회 재시도하며 최종 실패는 bounded 감사로그에 남긴 뒤에만 cursor를 진행합니다.
 
 ## Telegram에서 금지하는 작업
 

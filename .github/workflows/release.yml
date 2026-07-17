@@ -12,18 +12,22 @@ jobs:
   deb:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # 2026-07-17 master
         with:
           toolchain: 1.96.0
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2.9.1
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           cache-targets: false
       - name: Install cargo-deb
-        run: cargo install cargo-deb --version 3.7.0 --locked
+        run: |
+          cargo install cargo-deb --version 3.7.0 --locked
+          cargo install cargo-audit --version 0.22.1 --locked
       - name: Validate source
-        run: scripts/check.sh
+        run: |
+          scripts/check.sh
+          cargo audit
       - name: Build package
         run: |
           crate_version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "g7tg-agent") | .version')"

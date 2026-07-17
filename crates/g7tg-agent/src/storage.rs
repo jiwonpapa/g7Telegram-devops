@@ -16,6 +16,13 @@ use uuid::Uuid;
 
 use g7tg_core::ServiceAction;
 
+const AUDIT_RETENTION_SECONDS: i64 = 30 * 86_400;
+const AUDIT_MAX_ROWS: i64 = 10_000;
+const APPROVAL_MAX_ROWS: i64 = 256;
+const INCIDENT_HISTORY_MAX_ROWS: i64 = 5_000;
+const OUTBOX_RETENTION_SECONDS: i64 = 7 * 86_400;
+const OUTBOX_MAX_ROWS: i64 = 1_000;
+
 /// 등록된 Telegram owner입니다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Owner {
@@ -104,7 +111,8 @@ impl Store {
                 CREATE TABLE IF NOT EXISTS pairing (
                     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
                     code_hash BLOB NOT NULL,
-                    expires_at INTEGER NOT NULL
+                    expires_at INTEGER NOT NULL,
+                    replace_owner INTEGER NOT NULL DEFAULT 0 CHECK (replace_owner IN (0, 1))
                 );
                 CREATE TABLE IF NOT EXISTS audit_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -157,6 +165,7 @@ impl Store {
                 "#,
             )
             .context("SQLite schema 준비 실패")?;
+        ensure_pairing_replacement_column(&connection)?;
         Ok(Self {
             connection: Arc::new(Mutex::new(connection)),
         })
@@ -186,6 +195,20 @@ impl Store {
 
     /// 기존 연결 코드를 폐기하고 새 단회 code를 반환합니다.
     pub fn create_pairing_code(&self, ttl_seconds: u64) -> anyhow::Result<String> {
+        self.create_pairing_code_with_mode(ttl_seconds, false)
+    }
+
+    /// 기존 owner를 유지한 채 교체용 단회 code를 반환합니다.
+    pub fn create_owner_replacement_code(&self, ttl_seconds: u64) -> anyhow::Result<String> {
+        anyhow::ensure!(self.owner()?.is_some(), "교체할 기존 owner가 없습니다");
+        self.create_pairing_code_with_mode(ttl_seconds, true)
+    }
+
+    fn create_pairing_code_with_mode(
+        &self,
+        ttl_seconds: u64,
+        replace_owner: bool,
+    ) -> anyhow::Result<String> {
         let code: String = Uuid::new_v4()
             .simple()
             .to_string()
@@ -200,9 +223,16 @@ impl Store {
         let connection = self.lock()?;
         connection
             .execute(
-                "INSERT INTO pairing(singleton, code_hash, expires_at) VALUES(1, ?1, ?2) \
-                 ON CONFLICT(singleton) DO UPDATE SET code_hash=excluded.code_hash, expires_at=excluded.expires_at",
-                params![code_hash.as_slice(), expires_at],
+                "INSERT INTO pairing(singleton, code_hash, expires_at, replace_owner) \
+                 VALUES(1, ?1, ?2, ?3) \
+                 ON CONFLICT(singleton) DO UPDATE SET \
+                    code_hash=excluded.code_hash, expires_at=excluded.expires_at, \
+                    replace_owner=excluded.replace_owner",
+                params![
+                    code_hash.as_slice(),
+                    expires_at,
+                    if replace_owner { 1_i64 } else { 0_i64 }
+                ],
             )
             .context("pairing code 저장 실패")?;
         Ok(code)
@@ -221,18 +251,26 @@ impl Store {
             .context("pairing transaction 시작 실패")?;
         let stored = transaction
             .query_row(
-                "SELECT code_hash, expires_at FROM pairing WHERE singleton=1",
+                "SELECT code_hash, expires_at, replace_owner FROM pairing WHERE singleton=1",
                 [],
-                |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, i64>(1)?)),
+                |row| {
+                    Ok((
+                        row.get::<_, Vec<u8>>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                },
             )
             .optional()
             .context("pairing code 조회 실패")?;
-        let Some((stored_hash, expires_at)) = stored else {
+        let Some((stored_hash, expires_at, replace_owner)) = stored else {
             return Ok(false);
         };
         let candidate = hash_code(code.trim());
         let hash_matches: bool = stored_hash.as_slice().ct_eq(candidate.as_slice()).into();
-        if expires_at < now_unix() || !hash_matches {
+        let owner_exists = metadata_i64_on(&transaction, "owner_user_id")?.is_some()
+            || metadata_i64_on(&transaction, "owner_chat_id")?.is_some();
+        if expires_at < now_unix() || !hash_matches || (owner_exists && replace_owner != 1) {
             return Ok(false);
         }
 
@@ -244,14 +282,55 @@ impl Store {
         insert_audit_on(
             &transaction,
             Some(user_id),
-            "owner_paired",
+            if owner_exists {
+                "owner_replaced"
+            } else {
+                "owner_paired"
+            },
             "success",
             "private_chat",
         )?;
+        prune_audit_on(&transaction, now_unix())?;
         transaction
             .commit()
             .context("pairing transaction commit 실패")?;
         Ok(true)
+    }
+
+    /// owner와 대기 중인 연결코드·승인을 제거합니다.
+    pub fn clear_owner(&self) -> anyhow::Result<bool> {
+        let mut connection = self.lock()?;
+        let transaction = connection
+            .transaction()
+            .context("owner 해제 transaction 시작 실패")?;
+        let existed = metadata_i64_on(&transaction, "owner_user_id")?.is_some()
+            || metadata_i64_on(&transaction, "owner_chat_id")?.is_some();
+        transaction
+            .execute(
+                "DELETE FROM metadata WHERE key IN ('owner_user_id', 'owner_chat_id')",
+                [],
+            )
+            .context("owner metadata 제거 실패")?;
+        transaction
+            .execute("DELETE FROM pairing", [])
+            .context("pairing code 제거 실패")?;
+        transaction
+            .execute("DELETE FROM approvals", [])
+            .context("승인 제거 실패")?;
+        if existed {
+            insert_audit_on(
+                &transaction,
+                None,
+                "owner_unpaired",
+                "success",
+                "local_root",
+            )?;
+            prune_audit_on(&transaction, now_unix())?;
+        }
+        transaction
+            .commit()
+            .context("owner 해제 transaction commit 실패")?;
+        Ok(existed)
     }
 
     /// 보안과 운영 이벤트를 기록합니다.
@@ -262,8 +341,23 @@ impl Store {
         outcome: &str,
         detail: &str,
     ) -> anyhow::Result<()> {
-        let connection = self.lock()?;
-        insert_audit_on(&connection, actor_user_id, event_kind, outcome, detail)
+        let mut connection = self.lock()?;
+        let transaction = connection
+            .transaction()
+            .context("감사로그 transaction 시작 실패")?;
+        let now = now_unix();
+        insert_audit_at_on(
+            &transaction,
+            now,
+            actor_user_id,
+            event_kind,
+            outcome,
+            detail,
+        )?;
+        prune_audit_on(&transaction, now)?;
+        transaction
+            .commit()
+            .context("감사로그 transaction commit 실패")
     }
 
     /// 특정 사용자·동작·unit에 묶인 단회 승인 token을 발급합니다.
@@ -293,6 +387,7 @@ impl Store {
                 ],
             )
             .context("approval 저장 실패")?;
+        prune_approvals_on(&connection, now_unix())?;
         Ok(token)
     }
 
@@ -358,23 +453,25 @@ impl Store {
     /// 만료·소비된 승인을 제한된 수로 정리합니다.
     pub fn prune_approvals(&self) -> anyhow::Result<usize> {
         let connection = self.lock()?;
-        connection
-            .execute(
-                "DELETE FROM approvals WHERE rowid IN ( \
-                    SELECT rowid FROM approvals \
-                    WHERE expires_at < ?1 OR consumed_at IS NOT NULL \
-                    ORDER BY expires_at ASC LIMIT 256 \
-                )",
-                [now_unix()],
-            )
-            .context("approval 정리 실패")
+        prune_approvals_on(&connection, now_unix())
     }
 
     /// 관측된 문제와 현재 장애를 원자적으로 대조하고 outbox를 생성합니다.
+    #[cfg(test)]
     pub fn reconcile_incidents(
         &self,
         observed: &[ObservedIncident],
         confirmation_count: u32,
+    ) -> anyhow::Result<()> {
+        self.reconcile_incidents_scoped(observed, confirmation_count, &[])
+    }
+
+    /// 지정한 incident key prefix 범위만 원자적으로 대조합니다.
+    pub fn reconcile_incidents_scoped(
+        &self,
+        observed: &[ObservedIncident],
+        confirmation_count: u32,
+        prefixes: &[&str],
     ) -> anyhow::Result<()> {
         let mut connection = self.lock()?;
         let transaction = connection
@@ -386,6 +483,13 @@ impl Store {
 
         for incident in observed {
             validate_incident(incident)?;
+            anyhow::ensure!(
+                prefixes.is_empty()
+                    || prefixes
+                        .iter()
+                        .any(|prefix| incident.key.starts_with(prefix)),
+                "incident가 허용된 대조 범위를 벗어났습니다"
+            );
             observed_keys.insert(incident.key.as_str());
             let existing = transaction
                 .query_row(
@@ -457,6 +561,9 @@ impl Store {
                 .context("현재 incident 목록 변환 실패")?
         };
         for (key, severity, summary, first_seen, emitted) in current {
+            if !prefixes.is_empty() && !prefixes.iter().any(|prefix| key.starts_with(prefix)) {
+                continue;
+            }
             if observed_keys.contains(key.as_str()) {
                 continue;
             }
@@ -496,15 +603,18 @@ impl Store {
                 [history_cutoff],
             )
             .context("incident history 보존정책 실패")?;
-        let outbox_cutoff = now.saturating_sub(7 * 86_400);
+        prune_table_to_max_on(&transaction, "incident_history", INCIDENT_HISTORY_MAX_ROWS)?;
+        let outbox_cutoff = now.saturating_sub(OUTBOX_RETENTION_SECONDS);
         transaction
             .execute(
                 "DELETE FROM notification_outbox WHERE id IN (\
-                    SELECT id FROM notification_outbox WHERE sent_at IS NOT NULL AND sent_at < ?1 LIMIT 256\
+                    SELECT id FROM notification_outbox \
+                    WHERE created_at < ?1 LIMIT 256\
                 )",
                 [outbox_cutoff],
             )
             .context("notification outbox 보존정책 실패")?;
+        prune_table_to_max_on(&transaction, "notification_outbox", OUTBOX_MAX_ROWS)?;
         transaction
             .commit()
             .context("incident transaction commit 실패")
@@ -581,20 +691,51 @@ impl Store {
         let expires_at = now_unix()
             .checked_add(i64::try_from(duration_seconds).context("silence 기간 변환 실패")?)
             .ok_or_else(|| anyhow!("silence 만료시각 overflow"))?;
-        self.set_metadata("notification_silence_until", &expires_at.to_string())?;
+        let mut connection = self.lock()?;
+        let transaction = connection
+            .transaction()
+            .context("silence transaction 시작 실패")?;
+        set_metadata_on(
+            &transaction,
+            "notification_silence_until",
+            &expires_at.to_string(),
+        )?;
+        discard_pending_notifications_on(&transaction)?;
+        transaction
+            .commit()
+            .context("silence transaction commit 실패")?;
         Ok(expires_at)
+    }
+
+    /// 만료됐지만 아직 종료 안내를 하지 않은 silence 시각입니다.
+    pub fn expired_silence_until(&self) -> anyhow::Result<Option<i64>> {
+        Ok(self
+            .metadata_i64("notification_silence_until")?
+            .filter(|expires_at| *expires_at <= now_unix()))
+    }
+
+    /// 아직 보내지 않은 알림을 폐기해 silence 뒤 지연 전송을 막습니다.
+    pub fn discard_pending_notifications(&self) -> anyhow::Result<usize> {
+        let connection = self.lock()?;
+        discard_pending_notifications_on(&connection)
     }
 
     /// 알림 silence를 즉시 해제합니다.
     pub fn clear_silence(&self) -> anyhow::Result<()> {
-        let connection = self.lock()?;
-        connection
+        let mut connection = self.lock()?;
+        let transaction = connection
+            .transaction()
+            .context("silence 해제 transaction 시작 실패")?;
+        discard_pending_notifications_on(&transaction)?;
+        transaction
             .execute(
                 "DELETE FROM metadata WHERE key='notification_silence_until'",
                 [],
             )
             .context("silence 해제 실패")?;
-        Ok(())
+        transaction
+            .commit()
+            .context("silence 해제 transaction commit 실패")
     }
 
     fn metadata_i64(&self, key: &str) -> anyhow::Result<Option<i64>> {
@@ -633,8 +774,60 @@ fn set_metadata_on(connection: &Connection, key: &str, value: &str) -> anyhow::R
     Ok(())
 }
 
+fn metadata_i64_on(connection: &Connection, key: &str) -> anyhow::Result<Option<i64>> {
+    let value = connection
+        .query_row("SELECT value FROM metadata WHERE key=?1", [key], |row| {
+            row.get::<_, String>(0)
+        })
+        .optional()
+        .context("metadata 조회 실패")?;
+    value
+        .map(|value| value.parse::<i64>().context("metadata 정수 변환 실패"))
+        .transpose()
+}
+
+fn ensure_pairing_replacement_column(connection: &Connection) -> anyhow::Result<()> {
+    let mut statement = connection
+        .prepare("PRAGMA table_info(pairing)")
+        .context("pairing schema 조회 준비 실패")?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .context("pairing schema 조회 실패")?
+        .collect::<Result<Vec<_>, _>>()
+        .context("pairing schema 변환 실패")?;
+    drop(statement);
+    if !columns.iter().any(|column| column == "replace_owner") {
+        connection
+            .execute(
+                "ALTER TABLE pairing ADD COLUMN replace_owner INTEGER NOT NULL DEFAULT 0 \
+                 CHECK (replace_owner IN (0, 1))",
+                [],
+            )
+            .context("pairing schema migration 실패")?;
+    }
+    Ok(())
+}
+
 fn insert_audit_on(
     connection: &Connection,
+    actor_user_id: Option<i64>,
+    event_kind: &str,
+    outcome: &str,
+    detail: &str,
+) -> anyhow::Result<()> {
+    insert_audit_at_on(
+        connection,
+        now_unix(),
+        actor_user_id,
+        event_kind,
+        outcome,
+        detail,
+    )
+}
+
+fn insert_audit_at_on(
+    connection: &Connection,
+    occurred_at: i64,
     actor_user_id: Option<i64>,
     event_kind: &str,
     outcome: &str,
@@ -644,10 +837,82 @@ fn insert_audit_on(
         .execute(
             "INSERT INTO audit_events(occurred_at, actor_user_id, event_kind, outcome, detail) \
              VALUES(?1, ?2, ?3, ?4, ?5)",
-            params![now_unix(), actor_user_id, event_kind, outcome, detail],
+            params![occurred_at, actor_user_id, event_kind, outcome, detail],
         )
         .context("감사로그 저장 실패")?;
     Ok(())
+}
+
+fn prune_audit_on(connection: &Connection, now: i64) -> anyhow::Result<usize> {
+    let cutoff = now.saturating_sub(AUDIT_RETENTION_SECONDS);
+    let expired = connection
+        .execute(
+            "DELETE FROM audit_events WHERE id IN (\
+                SELECT id FROM audit_events WHERE occurred_at < ?1 ORDER BY id LIMIT 256\
+            )",
+            [cutoff],
+        )
+        .context("감사로그 기간 보존정책 실패")?;
+    let overflow = connection
+        .execute(
+            "DELETE FROM audit_events WHERE id <= COALESCE((\
+                SELECT id FROM audit_events ORDER BY id DESC LIMIT 1 OFFSET ?1\
+            ), -1)",
+            [AUDIT_MAX_ROWS],
+        )
+        .context("감사로그 개수 보존정책 실패")?;
+    Ok(expired.saturating_add(overflow))
+}
+
+fn prune_approvals_on(connection: &Connection, now: i64) -> anyhow::Result<usize> {
+    let stale = connection
+        .execute(
+            "DELETE FROM approvals WHERE rowid IN ( \
+                SELECT rowid FROM approvals \
+                WHERE expires_at < ?1 OR consumed_at IS NOT NULL \
+                ORDER BY expires_at ASC LIMIT 256 \
+            )",
+            [now],
+        )
+        .context("approval 정리 실패")?;
+    let overflow = connection
+        .execute(
+            "DELETE FROM approvals WHERE rowid <= COALESCE((\
+                SELECT rowid FROM approvals ORDER BY rowid DESC LIMIT 1 OFFSET ?1\
+            ), -1)",
+            [APPROVAL_MAX_ROWS],
+        )
+        .context("approval 개수 보존정책 실패")?;
+    Ok(stale.saturating_add(overflow))
+}
+
+fn prune_table_to_max_on(
+    connection: &Connection,
+    table: &str,
+    max_rows: i64,
+) -> anyhow::Result<usize> {
+    let statement = match table {
+        "incident_history" => {
+            "DELETE FROM incident_history WHERE id <= COALESCE((\
+                SELECT id FROM incident_history ORDER BY id DESC LIMIT 1 OFFSET ?1\
+            ), -1)"
+        }
+        "notification_outbox" => {
+            "DELETE FROM notification_outbox WHERE id <= COALESCE((\
+                SELECT id FROM notification_outbox ORDER BY id DESC LIMIT 1 OFFSET ?1\
+            ), -1)"
+        }
+        _ => return Err(anyhow!("지원하지 않는 보존정책 table입니다")),
+    };
+    connection
+        .execute(statement, [max_rows])
+        .with_context(|| format!("{table} 개수 보존정책 실패"))
+}
+
+fn discard_pending_notifications_on(connection: &Connection) -> anyhow::Result<usize> {
+    connection
+        .execute("DELETE FROM notification_outbox WHERE sent_at IS NULL", [])
+        .context("대기 알림 폐기 실패")
 }
 
 fn insert_notification_on(
@@ -693,9 +958,10 @@ fn now_unix() -> i64 {
 
 #[cfg(test)]
 mod tests {
+    use rusqlite::Connection;
     use tempfile::tempdir;
 
-    use super::Store;
+    use super::{AUDIT_MAX_ROWS, ObservedIncident, Store, now_unix};
 
     #[test]
     fn pairing_is_single_use_and_persists_owner() -> anyhow::Result<()> {
@@ -709,6 +975,58 @@ mod tests {
             .ok_or_else(|| anyhow::anyhow!("owner 없음"))?;
         assert_eq!(owner.user_id, 123);
         assert_eq!(owner.chat_id, 456);
+        Ok(())
+    }
+
+    #[test]
+    fn owner_replacement_keeps_old_owner_until_code_is_used() -> anyhow::Result<()> {
+        let directory = tempdir()?;
+        let store = Store::open(directory.path().join("state.sqlite3"))?;
+        let initial = store.create_pairing_code(300)?;
+        assert!(store.consume_pairing_code(&initial, 123, 456)?);
+
+        let ordinary = store.create_pairing_code(300)?;
+        assert!(!store.consume_pairing_code(&ordinary, 999, 999)?);
+        assert_eq!(store.owner()?.map(|owner| owner.user_id), Some(123));
+
+        let replacement = store.create_owner_replacement_code(300)?;
+        assert_eq!(store.owner()?.map(|owner| owner.user_id), Some(123));
+        assert!(store.consume_pairing_code(&replacement, 999, 999)?);
+        assert_eq!(store.owner()?.map(|owner| owner.user_id), Some(999));
+        Ok(())
+    }
+
+    #[test]
+    fn clear_owner_removes_identity_and_pending_approvals() -> anyhow::Result<()> {
+        let directory = tempdir()?;
+        let store = Store::open(directory.path().join("state.sqlite3"))?;
+        let code = store.create_pairing_code(300)?;
+        assert!(store.consume_pairing_code(&code, 123, 456)?);
+        let approval =
+            store.create_approval(123, g7tg_core::ServiceAction::Restart, "nginx.service", 45)?;
+        assert!(store.clear_owner()?);
+        assert!(store.owner()?.is_none());
+        assert!(store.consume_approval(&approval, 123)?.is_none());
+        assert!(!store.clear_owner()?);
+        Ok(())
+    }
+
+    #[test]
+    fn old_pairing_schema_is_migrated() -> anyhow::Result<()> {
+        let directory = tempdir()?;
+        let path = directory.path().join("state.sqlite3");
+        let connection = Connection::open(&path)?;
+        connection.execute_batch(
+            "CREATE TABLE pairing (\
+                singleton INTEGER PRIMARY KEY CHECK (singleton = 1),\
+                code_hash BLOB NOT NULL,\
+                expires_at INTEGER NOT NULL\
+            );",
+        )?;
+        drop(connection);
+
+        let store = Store::open(&path)?;
+        assert_eq!(store.create_pairing_code(300)?.len(), 8);
         Ok(())
     }
 
@@ -759,14 +1077,83 @@ mod tests {
     }
 
     #[test]
+    fn scoped_reconciliation_preserves_failed_collector_state() -> anyhow::Result<()> {
+        let directory = tempdir()?;
+        let store = Store::open(directory.path().join("state.sqlite3"))?;
+        let service = ObservedIncident {
+            key: "service:nginx.service".to_owned(),
+            severity: "critical".to_owned(),
+            summary: "nginx stopped".to_owned(),
+        };
+        let web = ObservedIncident {
+            key: "web:site".to_owned(),
+            severity: "critical".to_owned(),
+            summary: "site failed".to_owned(),
+        };
+        store.reconcile_incidents(&[service, web], 1)?;
+        store.reconcile_incidents_scoped(&[], 1, &["service:"])?;
+        let incidents = store.current_incidents()?;
+        assert_eq!(incidents.len(), 1);
+        assert_eq!(incidents[0].key, "web:site");
+        Ok(())
+    }
+
+    #[test]
     fn silence_can_be_set_and_cleared() -> anyhow::Result<()> {
         let directory = tempdir()?;
         let store = Store::open(directory.path().join("state.sqlite3"))?;
+        let issue = ObservedIncident {
+            key: "service:nginx".to_owned(),
+            severity: "critical".to_owned(),
+            summary: "Nginx 중지".to_owned(),
+        };
+        store.reconcile_incidents(&[issue], 1)?;
+        assert_eq!(store.pending_notifications(10)?.len(), 1);
         assert!(store.silence_until()?.is_none());
         assert!(store.set_silence(3600)? > 0);
         assert!(store.silence_until()?.is_some());
+        assert!(store.pending_notifications(10)?.is_empty());
         store.clear_silence()?;
         assert!(store.silence_until()?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn expired_silence_is_detected_until_cleared() -> anyhow::Result<()> {
+        let directory = tempdir()?;
+        let store = Store::open(directory.path().join("state.sqlite3"))?;
+        store.set_metadata(
+            "notification_silence_until",
+            &now_unix().saturating_sub(1).to_string(),
+        )?;
+        assert!(store.silence_until()?.is_none());
+        assert!(store.expired_silence_until()?.is_some());
+        store.clear_silence()?;
+        assert!(store.expired_silence_until()?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn audit_log_is_capped() -> anyhow::Result<()> {
+        let directory = tempdir()?;
+        let store = Store::open(directory.path().join("state.sqlite3"))?;
+        {
+            let connection = store.lock()?;
+            connection.execute_batch(&format!(
+                "WITH RECURSIVE counter(value) AS (\
+                    VALUES(1) UNION ALL SELECT value + 1 FROM counter WHERE value < {}\
+                 )\
+                 INSERT INTO audit_events(occurred_at, event_kind, outcome, detail)\
+                 SELECT {}, 'fixture', 'success', 'bounded' FROM counter;",
+                AUDIT_MAX_ROWS + 20,
+                now_unix()
+            ))?;
+        }
+        store.audit(None, "retention", "success", "trigger")?;
+        let connection = store.lock()?;
+        let count: i64 =
+            connection.query_row("SELECT COUNT(*) FROM audit_events", [], |row| row.get(0))?;
+        assert_eq!(count, AUDIT_MAX_ROWS);
         Ok(())
     }
 }

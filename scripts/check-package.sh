@@ -14,6 +14,7 @@ package=$1
 root=$(/usr/bin/mktemp -d)
 trap '/usr/bin/rm -rf "$root"' EXIT HUP INT TERM
 /usr/bin/dpkg-deb -x "$package" "$root"
+/usr/bin/dpkg-deb -e "$package" "$root/DEBIAN"
 
 for required in \
     usr/bin/g7tg \
@@ -51,5 +52,19 @@ service="$root/usr/lib/systemd/system/g7tg-agent.service"
     'CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_AUDIT_WRITE' \
     "$service"
 /usr/bin/grep -F -x -q 'AmbientCapabilities=' "$service"
+/usr/bin/grep -F -x -q 'UMask=0027' "$service"
+
+postinst="$root/DEBIAN/postinst"
+[ -f "$postinst" ]
+/usr/bin/grep -F -q \
+    '/usr/bin/systemctl restart g7tg-agent.service' \
+    "$postinst"
+if /usr/bin/grep -F -q 'try-restart g7tg-agent.service' "$postinst"; then
+    echo "postinst must not hide Agent restart failures" >&2
+    exit 1
+fi
+
+/usr/bin/grep -F -q 'install -y --allow-downgrades' scripts/install.sh
+/usr/bin/grep -F -q 'Agent health: PASS' scripts/install.sh
 
 echo "PASS: package structure and permissions"

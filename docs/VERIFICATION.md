@@ -14,6 +14,8 @@
 - `g7tg doctor` 최대 RSS: 64MiB 이하
 - 초기 SQLite: 1MiB 이하
 - Ubuntu 22.04에서 만든 amd64 패키지를 22.04와 24.04에 각각 설치
+- 이전 SQLite schema 자동 migration, owner 안전 교체, scoped collector 대조, bounded 감사로그
+- 패키지 재시작 실패 전파, downgrade 허용, 설치 후 health gate 정적 검사
 
 이 gate는 저사양 설치 적합성을 확인하지만, 실제 Bot token과 운영 서비스가 필요한 `VPS_PASS`를 대신하지 않습니다.
 
@@ -26,4 +28,3 @@
 5. 테스트용 allowlist 서비스만 선택해 취소, 만료, 승인 재시작을 각각 확인합니다.
 6. HTTP/TLS 장애와 복구 알림이 한 번씩 오는지 확인합니다.
 7. 24시간 idle CPU, 최대 RSS, SQLite 크기와 서비스 재시작 횟수를 기록합니다.
-

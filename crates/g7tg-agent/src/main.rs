@@ -39,11 +39,20 @@ enum Command {
     Run,
     /// 설정과 로컬 실행환경을 읽기 전용으로 검사합니다.
     Doctor,
-    /// 최초 Telegram owner 연결에 사용할 일회용 코드를 발급합니다.
+    /// Telegram owner 연결·교체에 사용할 일회용 코드를 발급합니다.
     Pair {
         /// 연결 코드 유효시간입니다.
         #[arg(long, default_value_t = 300)]
         ttl_seconds: u64,
+        /// 기존 owner를 유지하면서 새 owner가 코드를 사용할 때 교체합니다.
+        #[arg(long)]
+        replace: bool,
+    },
+    /// 등록된 Telegram owner와 대기 중인 승인을 제거합니다.
+    Unpair {
+        /// owner 제거 의도를 명시적으로 확인합니다.
+        #[arg(long)]
+        confirm: bool,
     },
     /// Bot token·서버 이름·서비스 allowlist·systemd를 대화형 설정합니다.
     Setup {
@@ -110,16 +119,46 @@ async fn main() -> anyhow::Result<()> {
             );
             Ok(())
         }
-        Command::Pair { ttl_seconds } => {
+        Command::Pair {
+            ttl_seconds,
+            replace,
+        } => {
             config.validate()?;
             anyhow::ensure!(
                 (60..=900).contains(&ttl_seconds),
                 "ttl_seconds는 60~900이어야 합니다"
             );
             let store = storage::Store::open(&config.state_database)?;
-            let code = store.create_pairing_code(ttl_seconds)?;
+            let owner_exists = store.owner()?.is_some();
+            anyhow::ensure!(
+                !owner_exists || replace,
+                "owner가 이미 등록되어 있습니다. 교체하려면 root로 pair --replace를 실행하십시오"
+            );
+            if replace {
+                ensure_root("owner 교체")?;
+            }
+            let code = if replace {
+                store.create_owner_replacement_code(ttl_seconds)?
+            } else {
+                store.create_pairing_code(ttl_seconds)?
+            };
             println!("Telegram에서 다음 연결 코드를 보내십시오: {code}");
             println!("유효시간: {ttl_seconds}초");
+            if replace {
+                println!("새 owner가 코드를 사용할 때까지 기존 owner는 유지됩니다.");
+            }
+            Ok(())
+        }
+        Command::Unpair { confirm } => {
+            config.validate()?;
+            ensure_root("owner 해제")?;
+            anyhow::ensure!(confirm, "owner 해제에는 --confirm이 필요합니다");
+            let store = storage::Store::open(&config.state_database)?;
+            if store.clear_owner()? {
+                println!("Telegram owner와 대기 중인 승인을 제거했습니다.");
+            } else {
+                println!("등록된 Telegram owner가 없습니다.");
+            }
             Ok(())
         }
         Command::Setup {
@@ -141,4 +180,17 @@ async fn main() -> anyhow::Result<()> {
             .await
         }
     }
+}
+
+fn ensure_root(operation: &str) -> anyhow::Result<()> {
+    let output = std::process::Command::new("id")
+        .arg("-u")
+        .output()
+        .with_context(|| format!("{operation} 권한 확인 실패"))?;
+    anyhow::ensure!(output.status.success(), "{operation} 권한 확인 실패");
+    anyhow::ensure!(
+        String::from_utf8_lossy(&output.stdout).trim() == "0",
+        "{operation}은 root 권한이 필요합니다"
+    );
+    Ok(())
 }

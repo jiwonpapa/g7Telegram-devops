@@ -18,18 +18,71 @@ pub async fn cycle(
     telegram: &TelegramClient,
 ) -> anyhow::Result<()> {
     let server_name = config.server_name.clone();
-    let snapshot = tokio::task::spawn_blocking(move || system::collect(&server_name)).await?;
-    let service_statuses = services::discover(&config.extra_service_units).await?;
-    let web_results = web::check_all(&config.web_checks).await?;
-    let observed = observe(config, &snapshot, &service_statuses, &web_results);
-    store.reconcile_incidents(&observed, config.incident_confirmation_count)?;
+    match tokio::task::spawn_blocking(move || system::collect(&server_name)).await {
+        Ok(snapshot) => {
+            store.reconcile_incidents_scoped(
+                &observe_system(config, &snapshot),
+                config.incident_confirmation_count,
+                &["system:", "disk:"],
+            )?;
+            reconcile_collector(store, config, "system", false)?;
+        }
+        Err(error) => {
+            tracing::warn!(error = %error, "시스템 상태 collector 실패");
+            reconcile_collector(store, config, "system", true)?;
+        }
+    }
+
+    match services::discover(&config.extra_service_units).await {
+        Ok(service_statuses) => {
+            store.reconcile_incidents_scoped(
+                &observe_services(&service_statuses),
+                config.incident_confirmation_count,
+                &["service:"],
+            )?;
+            reconcile_collector(store, config, "services", false)?;
+        }
+        Err(error) => {
+            tracing::warn!(error = %error, "서비스 상태 collector 실패");
+            reconcile_collector(store, config, "services", true)?;
+        }
+    }
+
+    match web::check_all(&config.web_checks).await {
+        Ok(web_results) => {
+            store.reconcile_incidents_scoped(
+                &observe_web(config, &web_results),
+                config.incident_confirmation_count,
+                &["web:", "tls:"],
+            )?;
+            reconcile_collector(store, config, "web", false)?;
+        }
+        Err(error) => {
+            tracing::warn!(error = %error, "웹 상태 collector 실패");
+            reconcile_collector(store, config, "web", true)?;
+        }
+    }
+
+    if store.silence_until()?.is_some() {
+        let discarded = store.discard_pending_notifications()?;
+        tracing::debug!(discarded, "알림중지 중 대기 알림을 억제했습니다");
+        return Ok(());
+    }
+
+    if store.expired_silence_until()?.is_some() {
+        store.discard_pending_notifications()?;
+        if let Some(owner) = store.owner()? {
+            let incidents = store.current_incidents()?;
+            let text = render_silence_digest(config, &incidents);
+            telegram.send_message(owner.chat_id, &text, None).await?;
+        }
+        store.clear_silence()?;
+        return Ok(());
+    }
 
     let Some(owner) = store.owner()? else {
         return Ok(());
     };
-    if store.silence_until()?.is_some() {
-        return Ok(());
-    }
     for notification in store.pending_notifications(20)? {
         let heading = if notification.kind == "opened" {
             "장애 발생"
@@ -46,12 +99,69 @@ pub async fn cycle(
     Ok(())
 }
 
+fn reconcile_collector(
+    store: &Store,
+    config: &AgentConfig,
+    collector: &str,
+    failed: bool,
+) -> anyhow::Result<()> {
+    let key = format!("agent:collector:{collector}");
+    let observed = failed
+        .then(|| ObservedIncident {
+            key: key.clone(),
+            severity: "warning".to_owned(),
+            summary: format!("{collector} 상태 수집기가 연속 실패했습니다"),
+        })
+        .into_iter()
+        .collect::<Vec<_>>();
+    store.reconcile_incidents_scoped(
+        &observed,
+        config.incident_confirmation_count,
+        &[key.as_str()],
+    )
+}
+
+fn render_silence_digest(
+    config: &AgentConfig,
+    incidents: &[crate::storage::CurrentIncident],
+) -> String {
+    if incidents.is_empty() {
+        return format!(
+            "[알림중지 종료] {}\n현재 확인된 장애가 없습니다.",
+            config.server_name
+        );
+    }
+    let mut lines = vec![format!(
+        "[알림중지 종료] {}\n현재 장애 {}건",
+        config.server_name,
+        incidents.len()
+    )];
+    lines.extend(
+        incidents
+            .iter()
+            .take(10)
+            .map(|incident| format!("- [{}] {}", incident.severity, incident.summary)),
+    );
+    if incidents.len() > 10 {
+        lines.push(format!("- 그 외 {}건", incidents.len() - 10));
+    }
+    lines.join("\n")
+}
+
+#[cfg(test)]
 fn observe(
     config: &AgentConfig,
     snapshot: &SystemSnapshot,
     service_statuses: &[g7tg_core::ServiceStatus],
     web_results: &[WebCheckResult],
 ) -> Vec<ObservedIncident> {
+    let mut incidents = observe_system(config, snapshot);
+    incidents.extend(observe_services(service_statuses));
+    incidents.extend(observe_web(config, web_results));
+    incidents
+}
+
+fn observe_system(config: &AgentConfig, snapshot: &SystemSnapshot) -> Vec<ObservedIncident> {
     let mut incidents = Vec::new();
     let cpu_percent = f64::from(snapshot.cpu_usage_percent);
     if cpu_percent >= config.cpu_warning_percent {
@@ -109,6 +219,11 @@ fn observe(
             });
         }
     }
+    incidents
+}
+
+fn observe_services(service_statuses: &[g7tg_core::ServiceStatus]) -> Vec<ObservedIncident> {
+    let mut incidents = Vec::new();
     for service in service_statuses {
         if !service.is_healthy() {
             incidents.push(ObservedIncident {
@@ -121,6 +236,11 @@ fn observe(
             });
         }
     }
+    incidents
+}
+
+fn observe_web(config: &AgentConfig, web_results: &[WebCheckResult]) -> Vec<ObservedIncident> {
+    let mut incidents = Vec::new();
     for result in web_results {
         if !result.healthy {
             incidents.push(ObservedIncident {

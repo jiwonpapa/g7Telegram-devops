@@ -64,7 +64,8 @@ pub fn render(menu: Menu, snapshot: Option<&SystemSnapshot>, config: &AgentConfi
         Menu::Services => placeholder("서비스", "다음 배치에서 자동 탐지를 연결합니다."),
         Menu::Web => placeholder("웹 상태", "HTTP/TLS 검증 배치에서 연결합니다."),
         Menu::Alerts => placeholder("장애/알림", "현재 등록된 장애가 없습니다."),
-        Menu::Settings => render_settings(None),
+        Menu::Settings => render_settings(None, config.server_reboot_enabled),
+        Menu::Power => render_power_menu(&config.server_name),
         Menu::Info => MenuView {
             text: format!(
                 "ℹ️ G7Telegram DevOps\nTelegram으로 서버 상태와 웹·서비스를 확인하고, 장애 알림과 승인형 재시작을 제공하는 서버 관리 앱입니다.\n버전: {}",
@@ -150,7 +151,10 @@ pub fn render_services_page(services: &[ServiceStatus], requested_page: usize) -
 
 /// 정기 상태 요약의 제한된 Telegram 설정 화면입니다.
 #[must_use]
-pub fn render_settings(status_digest_interval_seconds: Option<u64>) -> MenuView {
+pub fn render_settings(
+    status_digest_interval_seconds: Option<u64>,
+    server_reboot_enabled: bool,
+) -> MenuView {
     let current = match status_digest_interval_seconds {
         Some(21_600) => "6시간",
         Some(43_200) => "12시간",
@@ -164,22 +168,63 @@ pub fn render_settings(status_digest_interval_seconds: Option<u64>) -> MenuView 
             label.to_owned()
         }
     };
+    let mut rows = vec![
+        vec![
+            button(&selected(None, "꺼짐"), "digest:off"),
+            button(&selected(Some(21_600), "6시간"), "digest:21600"),
+        ],
+        vec![
+            button(&selected(Some(43_200), "12시간"), "digest:43200"),
+            button(&selected(Some(86_400), "24시간"), "digest:86400"),
+        ],
+    ];
+    if server_reboot_enabled {
+        rows.push(vec![button("⚡ 전원 관리", "menu:power")]);
+    }
+    rows.push(vec![button("⬅️ 뒤로가기", "menu:main")]);
     MenuView {
         text: format!(
-            "🔧 설정\n📊 정기 상태 요약: {current}\n\n🚨 장애·복구 알림은 항상 즉시 전송합니다. 정기 요약은 선택한 간격으로 자원·서비스·웹 상태를 알려드립니다."
+            "🔧 설정\n📊 정기 상태 요약: {current}\n⚡ 서버 재시작: {}\n\n🚨 장애·복구 알림은 항상 즉시 전송합니다. 정기 요약은 선택한 간격으로 자원·서비스·웹 상태를 알려드립니다.",
+            if server_reboot_enabled {
+                "사용"
+            } else {
+                "사용 안 함"
+            }
+        ),
+        keyboard: InlineKeyboardMarkup {
+            inline_keyboard: rows,
+        },
+    }
+}
+
+/// 로컬 setup에서 허용한 서버 전원 관리 화면입니다.
+#[must_use]
+pub fn render_power_menu(server_name: &str) -> MenuView {
+    MenuView {
+        text: format!(
+            "⚡ 전원 관리 · {server_name}\n\n서버 전체를 재시작하면 웹서비스와 Telegram Agent가 함께 중단됩니다. 버튼을 누른 뒤에도 일회용 확인문구를 직접 입력해야 실행됩니다."
         ),
         keyboard: InlineKeyboardMarkup {
             inline_keyboard: vec![
-                vec![
-                    button(&selected(None, "꺼짐"), "digest:off"),
-                    button(&selected(Some(21_600), "6시간"), "digest:21600"),
-                ],
-                vec![
-                    button(&selected(Some(43_200), "12시간"), "digest:43200"),
-                    button(&selected(Some(86_400), "24시간"), "digest:86400"),
-                ],
-                vec![button("⬅️ 뒤로가기", "menu:main")],
+                vec![button("🔄 서버 재시작", "power:plan")],
+                vec![button("⬅️ 뒤로가기", "menu:settings")],
             ],
+        },
+    }
+}
+
+/// 서버 재시작의 영향과 일회용 확인문구를 보여줍니다.
+#[must_use]
+pub fn render_reboot_confirmation(phrase: &str, ttl_seconds: u64) -> MenuView {
+    MenuView {
+        text: format!(
+            "⚠️ 서버 전체 재시작 확인\n\n웹서비스와 Telegram Agent가 잠시 중단됩니다.\n{ttl_seconds}초 안에 아래 문구를 채팅창에 정확히 입력하세요.\n\n{phrase}\n\n버튼만으로는 재시작되지 않습니다."
+        ),
+        keyboard: InlineKeyboardMarkup {
+            inline_keyboard: vec![vec![
+                button("❌ 취소", "power:cancel"),
+                button("⬅️ 뒤로가기", "menu:power"),
+            ]],
         },
     }
 }
@@ -609,6 +654,7 @@ mod tests {
             service_actions_enabled: false,
             action_executor: "/usr/lib/g7telegram-devops/g7tg-exec".to_owned(),
             approval_ttl_seconds: 45,
+            server_reboot_enabled: false,
             web_checks: Vec::new(),
             monitor_interval_seconds: 60,
             incident_confirmation_count: 2,
@@ -744,7 +790,7 @@ mod tests {
 
     #[test]
     fn settings_exposes_only_fixed_digest_intervals() {
-        let view = render_settings(Some(43_200));
+        let view = render_settings(Some(43_200), true);
         assert!(view.text.contains("정기 상태 요약: 12시간"));
         let callbacks: Vec<_> = view
             .keyboard
@@ -757,6 +803,29 @@ mod tests {
         assert!(callbacks.contains(&"digest:21600"));
         assert!(callbacks.contains(&"digest:43200"));
         assert!(callbacks.contains(&"digest:86400"));
+        assert!(callbacks.contains(&"menu:power"));
+    }
+
+    #[test]
+    fn reboot_confirmation_requires_typed_phrase_without_execute_button() {
+        let phrase = "서버재시작 G7Devops A1B2C3D4";
+        let view = super::render_reboot_confirmation(phrase, 60);
+        assert!(view.text.contains(phrase));
+        assert!(view.text.contains("60초"));
+        assert!(
+            view.keyboard
+                .inline_keyboard
+                .iter()
+                .flatten()
+                .all(|button| button.callback_data != "power:execute")
+        );
+        assert!(
+            view.keyboard
+                .inline_keyboard
+                .iter()
+                .flatten()
+                .any(|button| button.callback_data == "power:cancel")
+        );
     }
 
     #[test]

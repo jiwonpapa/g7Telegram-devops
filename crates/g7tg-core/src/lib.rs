@@ -18,6 +18,8 @@ pub enum Menu {
     Alerts,
     /// Telegram에서 변경할 수 있는 제한된 알림 설정입니다.
     Settings,
+    /// 로컬 setup에서 허용한 서버 전원 관리입니다.
+    Power,
     /// Agent와 서버 정보입니다.
     Info,
 }
@@ -33,6 +35,7 @@ impl Menu {
             "menu:web" => Some(Self::Web),
             "menu:alerts" => Some(Self::Alerts),
             "menu:settings" => Some(Self::Settings),
+            "menu:power" => Some(Self::Power),
             "menu:info" => Some(Self::Info),
             _ => None,
         }

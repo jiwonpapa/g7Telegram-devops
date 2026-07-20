@@ -2,11 +2,42 @@
 set -eu
 
 ALLOWLIST=/etc/g7telegram-devops/allowed-units
+REBOOT_SENTINEL=/etc/g7telegram-devops/allow-server-reboot
 
 usage() {
-    echo "usage: g7tg-exec check|restart UNIT" >&2
+    echo "usage: g7tg-exec check|restart UNIT | check-reboot | reboot" >&2
     exit 64
 }
+
+reboot_allowed() {
+    [ -f "$REBOOT_SENTINEL" ] || return 1
+    [ "$(/usr/bin/stat -c %U "$REBOOT_SENTINEL")" = root ] || return 1
+    [ "$(/usr/bin/stat -c %G "$REBOOT_SENTINEL")" = g7tg-agent ] || return 1
+    [ "$(/usr/bin/stat -c %a "$REBOOT_SENTINEL")" = 640 ] || return 1
+    [ "$(/usr/bin/stat -c %s "$REBOOT_SENTINEL")" = 8 ] || return 1
+    /usr/bin/grep -F -x -q 'enabled' "$REBOOT_SENTINEL"
+}
+
+if [ "$#" -eq 1 ]; then
+    case "$1" in
+        check-reboot)
+            reboot_allowed || exit 77
+            exit 0
+            ;;
+        reboot)
+            reboot_allowed || {
+                echo "server reboot is not enabled" >&2
+                exit 77
+            }
+            [ "$(/usr/bin/id -u)" -eq 0 ] || {
+                echo "root is required" >&2
+                exit 77
+            }
+            exec /usr/bin/systemctl reboot
+            ;;
+        *) usage ;;
+    esac
+fi
 
 [ "$#" -eq 2 ] || usage
 action=$1
@@ -45,4 +76,3 @@ fi
 }
 
 exec /usr/bin/systemctl restart "$unit"
-

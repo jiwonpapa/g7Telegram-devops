@@ -21,6 +21,7 @@ use crate::{
 };
 
 const ALLOWLIST_PATH: &str = "/etc/g7telegram-devops/allowed-units";
+const REBOOT_SENTINEL_PATH: &str = "/etc/g7telegram-devops/allow-server-reboot";
 const SECRET_PATH: &str = "/etc/g7telegram-devops/secrets/bot-token";
 const PAIRING_RESPONSE_GUIDANCE: [&str; 2] = [
     "Telegram 응답은 Agent 시작과 네트워크 상태에 따라 수초 걸릴 수 있습니다.",
@@ -63,6 +64,7 @@ pub async fn run(
     ensure!(bot.is_bot, "입력한 token이 Telegram Bot 계정이 아닙니다");
     println!("Telegram Bot 확인: {} (ID {})", bot.first_name, bot.id);
     configure_primary_web_check(config, web_url)?;
+    config.server_reboot_enabled = prompt_server_reboot(config.server_reboot_enabled)?;
 
     let discovered = services::discover(&config.extra_service_units).await?;
     let mut units: Vec<_> = discovered
@@ -80,6 +82,7 @@ pub async fn run(
     config.validate()?;
     write_atomic(config_path, &config.to_toml()?, 0o640)?;
     set_owner_and_mode(config_path, "root:g7tg-agent", "0640")?;
+    configure_reboot_sentinel(config.server_reboot_enabled)?;
 
     let store = Store::open(&config.state_database)?;
     let existing_owner = store.owner()?;
@@ -105,6 +108,14 @@ pub async fn run(
     } else {
         println!("웹 상태 검사: 미설정");
     }
+    println!(
+        "Telegram 서버 재시작: {}",
+        if config.server_reboot_enabled {
+            "사용"
+        } else {
+            "사용 안 함"
+        }
+    );
     if let Some(pairing_code) = pairing_code {
         println!("Telegram Bot에 다음 연결코드를 보내십시오: {pairing_code}");
         println!("연결코드 유효시간: {pairing_ttl_seconds}초");
@@ -183,6 +194,43 @@ fn prompt_web_url(existing_url: Option<&str>) -> anyhow::Result<Option<String>> 
         return existing_url.map(normalized_web_url).transpose();
     }
     normalized_web_url(&input).map(Some)
+}
+
+fn prompt_server_reboot(existing_enabled: bool) -> anyhow::Result<bool> {
+    println!("서버 재시작은 웹서비스와 Telegram Agent를 함께 중단합니다.");
+    if existing_enabled {
+        print!("Telegram 원격 서버 재시작 기능을 계속 사용하시겠습니까? [Y/n] ");
+    } else {
+        print!("Telegram 원격 서버 재시작 기능을 사용하시겠습니까? [y/N] ");
+    }
+    io::stdout()
+        .flush()
+        .context("server reboot prompt 출력 실패")?;
+    let mut input = String::new();
+    io::stdin()
+        .read_line(&mut input)
+        .context("server reboot 입력 실패")?;
+    parse_yes_no(&input, existing_enabled)
+}
+
+fn parse_yes_no(input: &str, default: bool) -> anyhow::Result<bool> {
+    match input.trim().to_ascii_lowercase().as_str() {
+        "" => Ok(default),
+        "y" | "yes" => Ok(true),
+        "n" | "no" => Ok(false),
+        _ => Err(anyhow!("y 또는 n을 입력하십시오")),
+    }
+}
+
+fn configure_reboot_sentinel(enabled: bool) -> anyhow::Result<()> {
+    let path = Path::new(REBOOT_SENTINEL_PATH);
+    if enabled {
+        write_atomic(path, "enabled\n", 0o640)?;
+        set_owner_and_mode(path, "root:g7tg-agent", "0640")?;
+    } else if path.exists() {
+        fs::remove_file(path).context("server reboot 허용 파일 제거 실패")?;
+    }
+    Ok(())
 }
 
 fn normalized_web_url(input: &str) -> anyhow::Result<String> {
@@ -344,7 +392,9 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use super::{normalized_web_url, validated_server_name, wait_for_owner, write_atomic};
+    use super::{
+        normalized_web_url, parse_yes_no, validated_server_name, wait_for_owner, write_atomic,
+    };
     use crate::storage::Store;
 
     #[test]
@@ -376,6 +426,16 @@ mod tests {
         assert!(normalized_web_url("ftp://example.com/").is_err());
         assert!(normalized_web_url("https://user:pass@example.com/").is_err());
         assert!(normalized_web_url("https://example.com/?token=secret").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn reboot_prompt_defaults_are_explicit_and_fail_closed() -> anyhow::Result<()> {
+        assert!(!parse_yes_no("", false)?);
+        assert!(parse_yes_no("", true)?);
+        assert!(parse_yes_no("Y", false)?);
+        assert!(!parse_yes_no("no", true)?);
+        assert!(parse_yes_no("maybe", false).is_err());
         Ok(())
     }
 

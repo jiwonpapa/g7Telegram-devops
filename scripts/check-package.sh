@@ -37,6 +37,7 @@ done
 [ "$(/usr/bin/stat -c %a "$root/etc/g7telegram-devops/agent.toml")" = 640 ]
 [ "$(/usr/bin/stat -c %a "$root/etc/sudoers.d/g7telegram-devops")" = 440 ]
 /usr/sbin/visudo -c -f "$root/etc/sudoers.d/g7telegram-devops" >/dev/null
+[ ! -e "$root/etc/g7telegram-devops/allow-server-reboot" ]
 
 config="$root/etc/g7telegram-devops/agent.toml"
 for threshold in \
@@ -48,6 +49,15 @@ for threshold in \
 do
     /usr/bin/grep -F -x -q "$threshold" "$config"
 done
+/usr/bin/grep -F -x -q 'server_reboot_enabled = false' "$config"
+
+sudoers="$root/etc/sudoers.d/g7telegram-devops"
+/usr/bin/grep -F -x -q \
+    'g7tg-agent ALL=(root) NOPASSWD: /usr/lib/g7telegram-devops/g7tg-exec reboot' \
+    "$sudoers"
+helper="$root/usr/lib/g7telegram-devops/g7tg-exec"
+/usr/bin/grep -F -q 'allow-server-reboot' "$helper"
+/usr/bin/grep -F -q 'check-reboot' "$helper"
 
 service="$root/usr/lib/systemd/system/g7tg-agent.service"
 /usr/bin/grep -F -x -q \
@@ -65,6 +75,7 @@ if /usr/bin/grep -F -q 'try-restart g7tg-agent.service' "$postinst"; then
     echo "postinst must not hide Agent restart failures" >&2
     exit 1
 fi
+/usr/bin/grep -F -q 'invalid server reboot permission file' "$postinst"
 
 postrm="$root/DEBIAN/postrm"
 [ -f "$postrm" ]

@@ -27,6 +27,8 @@ const PAIRING_FAILURE_LIMIT: i64 = 5;
 const PAIRING_FAILURE_WINDOW_SECONDS: i64 = 60;
 const PAIRING_BLOCK_SECONDS: i64 = 60;
 const STATUS_DIGEST_INTERVALS: [u64; 3] = [21_600, 43_200, 86_400];
+const REBOOT_APPROVAL_CODE_LENGTH: usize = 8;
+const REBOOT_COMPLETION_MAX_SECONDS: i64 = 3_600;
 
 /// 등록된 Telegram owner입니다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,6 +48,15 @@ pub struct Approval {
     pub action: ServiceAction,
     /// 승인한 정확한 systemd unit입니다.
     pub unit: String,
+}
+
+/// 이전 boot에서 요청된 서버 재시작 정보입니다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PendingReboot {
+    /// 요청한 Telegram user ID입니다.
+    pub actor_user_id: i64,
+    /// 재시작을 요청한 UNIX 시각입니다.
+    pub requested_at: i64,
 }
 
 /// 한 monitoring cycle에서 관측한 문제입니다.
@@ -147,6 +158,11 @@ impl Store {
                 );
                 CREATE INDEX IF NOT EXISTS approvals_expires_at
                     ON approvals(expires_at);
+                CREATE TABLE IF NOT EXISTS reboot_approvals (
+                    phrase_hash BLOB PRIMARY KEY,
+                    actor_user_id INTEGER NOT NULL,
+                    expires_at INTEGER NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS current_incidents (
                     incident_key TEXT PRIMARY KEY,
                     severity TEXT NOT NULL,
@@ -358,6 +374,19 @@ impl Store {
             .execute("DELETE FROM approvals", [])
             .context("승인 제거 실패")?;
         transaction
+            .execute("DELETE FROM reboot_approvals", [])
+            .context("서버 재시작 승인 제거 실패")?;
+        transaction
+            .execute(
+                "DELETE FROM metadata WHERE key IN (\
+                    'pending_reboot_boot_id',\
+                    'pending_reboot_actor_user_id',\
+                    'pending_reboot_requested_at'\
+                )",
+                [],
+            )
+            .context("서버 재시작 대기정보 제거 실패")?;
+        transaction
             .execute("DELETE FROM pairing_attempts", [])
             .context("pairing 실패 제한 제거 실패")?;
         if existed {
@@ -497,6 +526,165 @@ impl Store {
     pub fn prune_approvals(&self) -> anyhow::Result<usize> {
         let connection = self.lock()?;
         prune_approvals_on(&connection, now_unix())
+    }
+
+    /// 서버 이름과 일회용 code가 포함된 재시작 확인문구를 발급합니다.
+    pub fn create_reboot_approval(
+        &self,
+        actor_user_id: i64,
+        server_name: &str,
+        ttl_seconds: u64,
+    ) -> anyhow::Result<String> {
+        anyhow::ensure!(
+            (30..=120).contains(&ttl_seconds),
+            "server reboot approval TTL은 30~120초여야 합니다"
+        );
+        let code: String = Uuid::new_v4()
+            .simple()
+            .to_string()
+            .chars()
+            .take(REBOOT_APPROVAL_CODE_LENGTH)
+            .collect::<String>()
+            .to_ascii_uppercase();
+        let phrase = format!("서버재시작 {server_name} {code}");
+        let phrase_hash = hash_code(&phrase);
+        let expires_at = now_unix()
+            .checked_add(i64::try_from(ttl_seconds).context("server reboot TTL 변환 실패")?)
+            .ok_or_else(|| anyhow!("server reboot approval 만료시각 overflow"))?;
+        let mut connection = self.lock()?;
+        let transaction = connection
+            .transaction()
+            .context("server reboot approval transaction 시작 실패")?;
+        transaction
+            .execute("DELETE FROM reboot_approvals", [])
+            .context("이전 server reboot approval 제거 실패")?;
+        transaction
+            .execute(
+                "INSERT INTO reboot_approvals(phrase_hash, actor_user_id, expires_at) \
+                 VALUES(?1, ?2, ?3)",
+                params![phrase_hash.as_slice(), actor_user_id, expires_at],
+            )
+            .context("server reboot approval 저장 실패")?;
+        transaction
+            .commit()
+            .context("server reboot approval commit 실패")?;
+        Ok(phrase)
+    }
+
+    /// 정확한 서버 재시작 확인문구를 actor에 묶어 한 번만 소비합니다.
+    pub fn consume_reboot_approval(
+        &self,
+        phrase: &str,
+        actor_user_id: i64,
+    ) -> anyhow::Result<bool> {
+        let phrase_hash = hash_code(phrase);
+        let mut connection = self.lock()?;
+        let transaction = connection
+            .transaction()
+            .context("server reboot approval 소비 transaction 시작 실패")?;
+        let row = transaction
+            .query_row(
+                "SELECT actor_user_id, expires_at FROM reboot_approvals WHERE phrase_hash=?1",
+                [phrase_hash.as_slice()],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .optional()
+            .context("server reboot approval 조회 실패")?;
+        let Some((stored_actor, expires_at)) = row else {
+            return Ok(false);
+        };
+        if stored_actor != actor_user_id {
+            return Ok(false);
+        }
+        transaction
+            .execute(
+                "DELETE FROM reboot_approvals WHERE phrase_hash=?1",
+                [phrase_hash.as_slice()],
+            )
+            .context("server reboot approval 소비 실패")?;
+        let valid = expires_at >= now_unix();
+        transaction
+            .commit()
+            .context("server reboot approval 소비 commit 실패")?;
+        Ok(valid)
+    }
+
+    /// actor의 서버 재시작 확인문구를 취소합니다.
+    pub fn cancel_reboot_approval(&self, actor_user_id: i64) -> anyhow::Result<bool> {
+        let connection = self.lock()?;
+        let removed = connection
+            .execute(
+                "DELETE FROM reboot_approvals WHERE actor_user_id=?1",
+                [actor_user_id],
+            )
+            .context("server reboot approval 취소 실패")?;
+        Ok(removed > 0)
+    }
+
+    /// 재부팅 전 boot ID와 요청자를 원자 저장합니다.
+    pub fn mark_reboot_pending(&self, boot_id: &str, actor_user_id: i64) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !boot_id.is_empty() && boot_id.len() <= 64,
+            "pending reboot boot ID가 올바르지 않습니다"
+        );
+        let mut connection = self.lock()?;
+        let transaction = connection
+            .transaction()
+            .context("pending reboot transaction 시작 실패")?;
+        set_metadata_on(&transaction, "pending_reboot_boot_id", boot_id)?;
+        set_metadata_on(
+            &transaction,
+            "pending_reboot_actor_user_id",
+            &actor_user_id.to_string(),
+        )?;
+        set_metadata_on(
+            &transaction,
+            "pending_reboot_requested_at",
+            &now_unix().to_string(),
+        )?;
+        transaction.commit().context("pending reboot commit 실패")
+    }
+
+    /// 새 boot에서만 완료 알림에 사용할 이전 재시작 요청을 반환합니다.
+    pub fn pending_reboot_completion(
+        &self,
+        current_boot_id: &str,
+    ) -> anyhow::Result<Option<PendingReboot>> {
+        let mut connection = self.lock()?;
+        let transaction = connection
+            .transaction()
+            .context("pending reboot 조회 transaction 시작 실패")?;
+        let previous_boot_id = metadata_string_on(&transaction, "pending_reboot_boot_id")?;
+        let actor_user_id = metadata_i64_on(&transaction, "pending_reboot_actor_user_id")?;
+        let requested_at = metadata_i64_on(&transaction, "pending_reboot_requested_at")?;
+        let pending = match (previous_boot_id, actor_user_id, requested_at) {
+            (None, None, None) => None,
+            (Some(previous_boot_id), Some(actor_user_id), Some(requested_at)) => {
+                let age = now_unix().saturating_sub(requested_at);
+                if previous_boot_id == current_boot_id
+                    || !(0..=REBOOT_COMPLETION_MAX_SECONDS).contains(&age)
+                {
+                    clear_pending_reboot_on(&transaction)?;
+                    None
+                } else {
+                    Some(PendingReboot {
+                        actor_user_id,
+                        requested_at,
+                    })
+                }
+            }
+            _ => return Err(anyhow!("pending reboot metadata가 불완전합니다")),
+        };
+        transaction
+            .commit()
+            .context("pending reboot 조회 commit 실패")?;
+        Ok(pending)
+    }
+
+    /// 완료 또는 실패한 서버 재시작 대기정보를 제거합니다.
+    pub fn clear_pending_reboot(&self) -> anyhow::Result<()> {
+        let connection = self.lock()?;
+        clear_pending_reboot_on(&connection)
     }
 
     /// 관측된 문제와 현재 장애를 원자적으로 대조하고 outbox를 생성합니다.
@@ -899,6 +1087,29 @@ fn metadata_i64_on(connection: &Connection, key: &str) -> anyhow::Result<Option<
         .transpose()
 }
 
+fn metadata_string_on(connection: &Connection, key: &str) -> anyhow::Result<Option<String>> {
+    connection
+        .query_row("SELECT value FROM metadata WHERE key=?1", [key], |row| {
+            row.get::<_, String>(0)
+        })
+        .optional()
+        .context("metadata 문자열 조회 실패")
+}
+
+fn clear_pending_reboot_on(connection: &Connection) -> anyhow::Result<()> {
+    connection
+        .execute(
+            "DELETE FROM metadata WHERE key IN (\
+                'pending_reboot_boot_id',\
+                'pending_reboot_actor_user_id',\
+                'pending_reboot_requested_at'\
+            )",
+            [],
+        )
+        .context("pending reboot metadata 제거 실패")?;
+    Ok(())
+}
+
 fn register_pairing_failure_on(
     connection: &Connection,
     user_id: i64,
@@ -1172,9 +1383,13 @@ mod tests {
         assert!(store.consume_pairing_code(&code, 123, 456)?);
         let approval =
             store.create_approval(123, g7tg_core::ServiceAction::Restart, "nginx.service", 45)?;
+        let reboot_phrase = store.create_reboot_approval(123, "demo", 60)?;
+        store.mark_reboot_pending("boot-a", 123)?;
         assert!(store.clear_owner()?);
         assert!(store.owner()?.is_none());
         assert!(store.consume_approval(&approval, 123)?.is_none());
+        assert!(!store.consume_reboot_approval(&reboot_phrase, 123)?);
+        assert!(store.pending_reboot_completion("boot-b")?.is_none());
         assert!(!store.clear_owner()?);
         Ok(())
     }
@@ -1242,6 +1457,40 @@ mod tests {
             .ok_or_else(|| anyhow::anyhow!("approval 없음"))?;
         assert_eq!(approval.unit, "nginx.service");
         assert!(store.consume_approval(&token, 123)?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn reboot_phrase_is_actor_bound_exact_and_single_use() -> anyhow::Result<()> {
+        let directory = tempdir()?;
+        let store = Store::open(directory.path().join("state.sqlite3"))?;
+        let phrase = store.create_reboot_approval(123, "G7Devops", 60)?;
+        assert!(phrase.starts_with("서버재시작 G7Devops "));
+        assert_eq!(phrase.split_whitespace().count(), 3);
+        assert!(!store.consume_reboot_approval(&format!("{phrase}X"), 123)?);
+        assert!(!store.consume_reboot_approval(&phrase, 999)?);
+        assert!(store.consume_reboot_approval(&phrase, 123)?);
+        assert!(!store.consume_reboot_approval(&phrase, 123)?);
+        Ok(())
+    }
+
+    #[test]
+    fn reboot_completion_requires_a_new_boot_and_is_cleared() -> anyhow::Result<()> {
+        let directory = tempdir()?;
+        let store = Store::open(directory.path().join("state.sqlite3"))?;
+
+        store.mark_reboot_pending("boot-a", 123)?;
+        assert!(store.pending_reboot_completion("boot-a")?.is_none());
+        assert!(store.pending_reboot_completion("boot-b")?.is_none());
+
+        store.mark_reboot_pending("boot-a", 123)?;
+        let pending = store
+            .pending_reboot_completion("boot-b")?
+            .ok_or_else(|| anyhow::anyhow!("reboot completion 없음"))?;
+        assert_eq!(pending.actor_user_id, 123);
+        assert!(pending.requested_at <= now_unix());
+        store.clear_pending_reboot()?;
+        assert!(store.pending_reboot_completion("boot-b")?.is_none());
         Ok(())
     }
 

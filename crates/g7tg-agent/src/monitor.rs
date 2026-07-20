@@ -417,6 +417,7 @@ mod tests {
             service_actions_enabled: false,
             action_executor: "/usr/lib/g7telegram-devops/g7tg-exec".to_owned(),
             approval_ttl_seconds: 45,
+            server_reboot_enabled: false,
             web_checks: Vec::new(),
             monitor_interval_seconds: 60,
             incident_confirmation_count: 2,

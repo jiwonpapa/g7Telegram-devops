@@ -9,13 +9,14 @@ use tokio::task;
 use crate::{
     actions,
     config::AgentConfig,
-    menu, monitor, services,
+    menu, monitor, power, services,
     storage::{Owner, Store},
     system,
     telegram::{CallbackQuery, Message, TelegramClient, Update},
 };
 
 const UPDATE_MAX_ATTEMPTS: u32 = 3;
+const REBOOT_APPROVAL_TTL_SECONDS: u64 = 60;
 
 /// 설정을 검증하고 종료 신호까지 Agent를 실행합니다.
 pub async fn run(config: AgentConfig) -> anyhow::Result<()> {
@@ -23,6 +24,7 @@ pub async fn run(config: AgentConfig) -> anyhow::Result<()> {
     let telegram = TelegramClient::from_token_file(&config.bot_token_file)?;
     let me = telegram.get_me().await?;
     telegram.delete_webhook().await?;
+    notify_completed_reboot(&store, &telegram).await?;
     tracing::info!(
         server = %config.server_name,
         bot_id = me.id,
@@ -186,6 +188,10 @@ async fn handle_message(
         return Ok(());
     }
 
+    if text.starts_with("서버재시작 ") {
+        return handle_reboot_phrase(config, store, telegram, owner, text).await;
+    }
+
     if matches!(text, "메뉴" | "시작" | "/start") {
         if matches!(text, "시작" | "/start") {
             telegram
@@ -207,6 +213,151 @@ async fn handle_message(
             .await?;
     }
     Ok(())
+}
+
+async fn handle_reboot_phrase(
+    config: &AgentConfig,
+    store: &Store,
+    telegram: &TelegramClient,
+    owner: Owner,
+    phrase: &str,
+) -> anyhow::Result<()> {
+    if !config.server_reboot_enabled {
+        store.audit(Some(owner.user_id), "server_reboot", "denied", "disabled")?;
+        telegram
+            .send_message(
+                owner.chat_id,
+                "⚪ 서버 재시작 기능이 비활성화되어 있습니다. 서버 콘솔에서 sudo g7tg setup을 실행해야 활성화할 수 있습니다.",
+                None,
+            )
+            .await?;
+        return Ok(());
+    }
+    if !store.consume_reboot_approval(phrase, owner.user_id)? {
+        store.audit(
+            Some(owner.user_id),
+            "server_reboot",
+            "denied",
+            "invalid_or_expired_phrase",
+        )?;
+        telegram
+            .send_message(
+                owner.chat_id,
+                "❌ 확인문구가 틀렸거나 만료되었습니다. 전원 관리 메뉴에서 다시 시작하세요.",
+                None,
+            )
+            .await?;
+        return Ok(());
+    }
+    if !power::can_reboot(&config.action_executor).await? {
+        store.audit(
+            Some(owner.user_id),
+            "server_reboot",
+            "denied",
+            "executor_not_ready",
+        )?;
+        telegram
+            .send_message(
+                owner.chat_id,
+                "❌ 서버의 재시작 허용 설정을 확인할 수 없습니다. 서버 콘솔에서 sudo g7tg doctor를 실행하세요.",
+                None,
+            )
+            .await?;
+        return Ok(());
+    }
+
+    let boot_id = power::current_boot_id()?;
+    store.mark_reboot_pending(&boot_id, owner.user_id)?;
+    store.audit(
+        Some(owner.user_id),
+        "server_reboot",
+        "approved",
+        "typed_one_time_phrase",
+    )?;
+    if let Err(error) = telegram
+        .send_message(
+            owner.chat_id,
+            "✅ 서버 재시작 요청을 승인했습니다. 잠시 후 연결이 종료되며, 부팅이 완료되면 다시 알려드리겠습니다.",
+            None,
+        )
+        .await
+    {
+        store.clear_pending_reboot()?;
+        store.audit(
+            Some(owner.user_id),
+            "server_reboot",
+            "failed",
+            "telegram_ack_failed",
+        )?;
+        return Err(error.context("서버 재시작 안내 전송 실패"));
+    }
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    store.audit(
+        Some(owner.user_id),
+        "server_reboot",
+        "requested",
+        "root_helper",
+    )?;
+    if let Err(error) = power::execute_reboot(&config.action_executor).await {
+        store.clear_pending_reboot()?;
+        store.audit(
+            Some(owner.user_id),
+            "server_reboot",
+            "failed",
+            "executor_failed",
+        )?;
+        tracing::warn!(error = %error, "서버 재시작 실행 실패");
+        telegram
+            .send_message(
+                owner.chat_id,
+                "❌ 서버 재시작 요청에 실패했습니다. 서버 콘솔에서 상태를 확인하세요.",
+                None,
+            )
+            .await?;
+    }
+    Ok(())
+}
+
+async fn notify_completed_reboot(store: &Store, telegram: &TelegramClient) -> anyhow::Result<()> {
+    let current_boot_id = power::current_boot_id()?;
+    let Some(pending) = store.pending_reboot_completion(&current_boot_id)? else {
+        return Ok(());
+    };
+    let Some(owner) = store.owner()? else {
+        store.clear_pending_reboot()?;
+        return Ok(());
+    };
+    let elapsed_seconds = time::OffsetDateTime::now_utc()
+        .unix_timestamp()
+        .saturating_sub(pending.requested_at);
+    telegram
+        .send_message(
+            owner.chat_id,
+            &format!(
+                "🟢 서버 재시작 완료\n중단 시간: {}",
+                format_elapsed(elapsed_seconds)
+            ),
+            Some(menu::persistent_menu_keyboard()),
+        )
+        .await?;
+    store.audit(
+        Some(pending.actor_user_id),
+        "server_reboot",
+        "completed",
+        "new_boot_detected",
+    )?;
+    store.clear_pending_reboot()?;
+    Ok(())
+}
+
+fn format_elapsed(seconds: i64) -> String {
+    let seconds = seconds.max(0);
+    if seconds >= 60 {
+        format!("{}분 {}초", seconds / 60, seconds % 60)
+    } else {
+        format!("{seconds}초")
+    }
 }
 
 async fn handle_callback(
@@ -240,6 +391,54 @@ async fn handle_callback(
         return Ok(());
     }
     let data = callback.data.as_deref().unwrap_or_default();
+    if data == "power:plan" {
+        if !config.server_reboot_enabled || !power::can_reboot(&config.action_executor).await? {
+            telegram
+                .answer_callback(&callback.id, "서버 재시작 기능이 비활성화되어 있습니다.")
+                .await?;
+            return Ok(());
+        }
+        let phrase = store.create_reboot_approval(
+            callback.from.id,
+            &config.server_name,
+            REBOOT_APPROVAL_TTL_SECONDS,
+        )?;
+        let view = menu::render_reboot_confirmation(&phrase, REBOOT_APPROVAL_TTL_SECONDS);
+        telegram
+            .edit_message(
+                message.chat.id,
+                message.message_id,
+                &view.text,
+                view.keyboard,
+            )
+            .await?;
+        telegram
+            .answer_callback(&callback.id, "확인문구를 직접 입력하세요.")
+            .await?;
+        return Ok(());
+    }
+    if data == "power:cancel" {
+        let _ = store.cancel_reboot_approval(callback.from.id)?;
+        let view = menu::render_power_menu(&config.server_name);
+        telegram
+            .edit_message(
+                message.chat.id,
+                message.message_id,
+                &view.text,
+                view.keyboard,
+            )
+            .await?;
+        telegram.answer_callback(&callback.id, "취소됨").await?;
+        return Ok(());
+    }
+    if data == "menu:power"
+        && (!config.server_reboot_enabled || !power::can_reboot(&config.action_executor).await?)
+    {
+        telegram
+            .answer_callback(&callback.id, "서버 재시작 기능이 비활성화되어 있습니다.")
+            .await?;
+        return Ok(());
+    }
     if let Some(value) = data.strip_prefix("silence:") {
         match value {
             "3600" => {
@@ -288,7 +487,10 @@ async fn handle_callback(
             "success",
             value,
         )?;
-        let view = menu::render_settings(store.status_digest_interval_seconds()?);
+        let view = menu::render_settings(
+            store.status_digest_interval_seconds()?,
+            config.server_reboot_enabled,
+        );
         telegram
             .edit_message(
                 message.chat.id,
@@ -403,7 +605,11 @@ async fn handle_callback(
             menu::render_web_checks(&results, &config.web_checks)
         }
         Menu::Alerts => menu::render_alerts(&store.current_incidents()?, store.silence_until()?),
-        Menu::Settings => menu::render_settings(store.status_digest_interval_seconds()?),
+        Menu::Settings => menu::render_settings(
+            store.status_digest_interval_seconds()?,
+            config.server_reboot_enabled,
+        ),
+        Menu::Power => menu::render_power_menu(&config.server_name),
         _ => menu::render(target_menu, snapshot.as_ref(), config),
     };
     telegram
@@ -575,7 +781,11 @@ async fn send_new_menu(
             menu::render_web_checks(&results, &config.web_checks)
         }
         Menu::Alerts => menu::render_alerts(&store.current_incidents()?, store.silence_until()?),
-        Menu::Settings => menu::render_settings(store.status_digest_interval_seconds()?),
+        Menu::Settings => menu::render_settings(
+            store.status_digest_interval_seconds()?,
+            config.server_reboot_enabled,
+        ),
+        Menu::Power => menu::render_power_menu(&config.server_name),
         _ => menu::render(target_menu, snapshot.as_ref(), config),
     };
     let keyboard = Some(serde_json::to_value(view.keyboard).context("메뉴 JSON 생성 실패")?);
@@ -589,7 +799,7 @@ fn is_owner(owner: Owner, user_id: i64, chat_id: i64) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{bounded_detail, update_retry_delay_seconds};
+    use super::{bounded_detail, format_elapsed, update_retry_delay_seconds};
 
     #[test]
     fn update_retry_delay_is_bounded() {
@@ -602,5 +812,12 @@ mod tests {
     fn dead_letter_detail_is_bounded_by_characters() {
         let detail = bounded_detail(&"가".repeat(700));
         assert_eq!(detail.chars().count(), 500);
+    }
+
+    #[test]
+    fn reboot_elapsed_time_is_human_readable() {
+        assert_eq!(format_elapsed(48), "48초");
+        assert_eq!(format_elapsed(125), "2분 5초");
+        assert_eq!(format_elapsed(-1), "0초");
     }
 }

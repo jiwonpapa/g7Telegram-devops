@@ -10,6 +10,7 @@ mod actions;
 mod config;
 mod menu;
 mod monitor;
+mod power;
 mod runtime;
 mod services;
 mod setup;
@@ -96,6 +97,11 @@ async fn main() -> anyhow::Result<()> {
         Command::Doctor => {
             config.validate()?;
             let store = storage::Store::open(&config.state_database)?;
+            let reboot_executor_ready = power::can_reboot(&config.action_executor).await?;
+            anyhow::ensure!(
+                reboot_executor_ready == config.server_reboot_enabled,
+                "서버 재시작 설정과 root helper 허용 상태가 일치하지 않습니다. sudo g7tg setup을 다시 실행하십시오"
+            );
             let owner = store.owner()?;
             let owner_state = if owner.is_some() {
                 "paired"
@@ -117,6 +123,14 @@ async fn main() -> anyhow::Result<()> {
                 config.memory_warning_percent,
                 config.swap_warning_percent,
                 config.disk_warning_percent
+            );
+            println!(
+                "Server reboot: {}",
+                if config.server_reboot_enabled {
+                    "enabled"
+                } else {
+                    "disabled"
+                }
             );
             Ok(())
         }

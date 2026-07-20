@@ -19,6 +19,7 @@ old_root="$temporary/old-root"
     -e '/^cpu_warning_percent = /d' \
     -e '/^load_warning_per_cpu = /d' \
     -e '/^swap_warning_percent = /d' \
+    -e '/^server_reboot_enabled = /d' \
     "$old_root/etc/g7telegram-devops/agent.toml"
 /usr/bin/sed -i 's/^Version: .*/Version: 0.3.99-1/' "$old_root/DEBIAN/control"
 old_package="$temporary/g7telegram-devops-old.deb"
@@ -48,6 +49,23 @@ output="$temporary/output"
 /usr/bin/grep -F -q \
     'Thresholds: CPU 90.0%, Load 1.50/CPU, Memory 90.0%, Swap 80.0% with memory pressure, Disk 85.0%' \
     "$output"
+/usr/bin/grep -F -x -q 'Server reboot: disabled' "$output"
+
+helper=/usr/lib/g7telegram-devops/g7tg-exec
+if /usr/sbin/runuser -u g7tg-agent -- "$helper" check-reboot; then
+    echo "server reboot must be disabled by default" >&2
+    exit 1
+fi
+/usr/bin/printf 'enabled\n' > /etc/g7telegram-devops/allow-server-reboot
+/usr/bin/chown root:g7tg-agent /etc/g7telegram-devops/allow-server-reboot
+/usr/bin/chmod 0640 /etc/g7telegram-devops/allow-server-reboot
+/usr/sbin/runuser -u g7tg-agent -- "$helper" check-reboot
+/usr/bin/printf 'enabled\nextra\n' > /etc/g7telegram-devops/allow-server-reboot
+if /usr/sbin/runuser -u g7tg-agent -- "$helper" check-reboot; then
+    echo "server reboot permission accepted an invalid body" >&2
+    exit 1
+fi
+/usr/bin/rm -f /etc/g7telegram-devops/allow-server-reboot
 
 rss_kib=$(/usr/bin/awk '/Maximum resident set size/ {print $NF}' "$metrics")
 [ -n "$rss_kib" ]

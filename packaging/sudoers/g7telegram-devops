@@ -1,3 +1,3 @@
 # g7tg-exec validates the exact root-owned unit allowlist before execution.
 g7tg-agent ALL=(root) NOPASSWD: /usr/lib/g7telegram-devops/g7tg-exec restart *
-
+g7tg-agent ALL=(root) NOPASSWD: /usr/lib/g7telegram-devops/g7tg-exec reboot

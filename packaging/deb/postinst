@@ -17,6 +17,15 @@ fi
 /usr/bin/chmod 0640 /etc/g7telegram-devops/agent.toml
 /usr/bin/chown root:root /etc/g7telegram-devops/allowed-units
 /usr/bin/chmod 0644 /etc/g7telegram-devops/allowed-units
+if [ -e /etc/g7telegram-devops/allow-server-reboot ]; then
+    if [ "$(/usr/bin/stat -c %s /etc/g7telegram-devops/allow-server-reboot)" != 8 ] ||
+        ! /usr/bin/grep -F -x -q enabled /etc/g7telegram-devops/allow-server-reboot; then
+        echo "invalid server reboot permission file" >&2
+        exit 1
+    fi
+    /usr/bin/chown root:g7tg-agent /etc/g7telegram-devops/allow-server-reboot
+    /usr/bin/chmod 0640 /etc/g7telegram-devops/allow-server-reboot
+fi
 /usr/sbin/visudo -c -f /etc/sudoers.d/g7telegram-devops >/dev/null
 /usr/bin/systemctl daemon-reload >/dev/null 2>&1 || true
 

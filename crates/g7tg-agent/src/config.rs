@@ -35,6 +35,9 @@ pub struct AgentConfig {
     /// 재시작 승인 token의 유효시간입니다.
     #[serde(default = "default_approval_ttl")]
     pub approval_ttl_seconds: u64,
+    /// Telegram을 통한 서버 전체 재시작을 로컬에서 허용했는지 표시합니다.
+    #[serde(default)]
+    pub server_reboot_enabled: bool,
     /// 공개 웹 endpoint의 최소 가용성 검사입니다.
     #[serde(default)]
     pub web_checks: Vec<WebCheckConfig>,
@@ -327,6 +330,7 @@ bot_token_file = "/run/credentials/token"
             service_actions_enabled: false,
             action_executor: "/usr/lib/g7telegram-devops/g7tg-exec".to_owned(),
             approval_ttl_seconds: 45,
+            server_reboot_enabled: false,
             web_checks: Vec::new(),
             monitor_interval_seconds: 60,
             incident_confirmation_count: 2,

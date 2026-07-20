@@ -44,9 +44,10 @@ sudo g7tg setup
 5. token을 root 전용 secret으로 저장
 6. 관리 대상 systemd service 자동 탐지
 7. exact unit allowlist와 45초 재승인형 restart 기능 설정
-8. Agent systemd enable/restart와 활성 상태 확인
-9. 일회용 Telegram 연결코드 출력
-10. Bot 개인채팅에 코드를 보낸 발신자의 숫자 user/chat ID 자동 저장
+8. 선택형 Telegram 서버 재시작 사용 여부 확인(기본 `N`)
+9. Agent systemd enable/restart와 활성 상태 확인
+10. 일회용 Telegram 연결코드 출력
+11. Bot 개인채팅에 코드를 보낸 발신자의 숫자 user/chat ID 자동 저장
 
 사용자명이나 수동 입력한 숫자 ID는 신뢰하지 않습니다. Telegram이 전달한 실제 private chat 발신자 ID만 단회 연결코드와 함께 저장합니다. 연결 대기를 생략하려면 `--no-wait-for-pairing`을 사용합니다.
 
@@ -124,7 +125,7 @@ curl -fsSL https://github.com/jiwonpapa/g7Telegram-devops/raw/main/install.sh | 
 
 ```bash
 curl -fsSL https://github.com/jiwonpapa/g7Telegram-devops/raw/main/install.sh \
-  | sudo G7TG_VERSION=0.6.1-beta.4 sh
+  | sudo G7TG_VERSION=0.6.1-beta.5 sh
 ```
 
 ## 관리자 로컬 릴리스와 배포
@@ -152,6 +153,14 @@ G7TG_DEPLOY_TARGET=g7devops scripts/release-local.sh
 ## Telegram 정기 상태 요약
 
 `메뉴 → 설정`에서 `꺼짐`(기본), `6시간`, `12시간`, `24시간` 중 하나를 선택합니다. 선택 시점부터 간격을 계산하며 서버 자원, 서비스, 웹 검사, 현재 장애 수와 UTC 점검시각을 보냅니다. 장애·복구 알림은 이 설정과 관계없이 즉시 전송하고 알림중지 중에는 정기 요약도 보내지 않습니다.
+
+## 선택형 서버 재시작
+
+전체 서버 재시작은 기본으로 꺼져 있습니다. VPS 콘솔에서 `sudo g7tg setup`을 실행하고 `Telegram 원격 서버 재시작 기능` 질문에 `Y`를 입력해야만 `메뉴 → 설정 → 전원 관리`가 나타납니다. Telegram에서 이 권한을 켤 수는 없습니다.
+
+`서버 재시작`을 누르는 것만으로는 실행되지 않습니다. Bot이 발급한 `서버재시작 서버이름 8자리코드` 전체를 60초 안에 직접 입력해야 하며, 문구는 owner와 연결된 단회용입니다. Agent는 실행 안내를 먼저 보낸 뒤 고정된 `systemctl reboot`만 요청하고, 새 boot ID가 확인되면 재시작 완료와 중단 시간을 알립니다.
+
+이 기능을 끄려면 `sudo g7tg setup`을 다시 실행해 질문에 `N`을 입력합니다. 전체 서버가 멈추거나 네트워크가 끊기면 Agent도 메시지를 보낼 수 있으므로 클라우드 사업자의 콘솔·복구 기능은 별도로 유지하십시오.
 
 ## 제거
 

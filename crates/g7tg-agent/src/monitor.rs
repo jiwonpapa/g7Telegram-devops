@@ -1,6 +1,6 @@
 //! 주기적 상태 대조와 Telegram 장애·복구 알림입니다.
 
-use g7tg_core::{SystemSnapshot, WebCheckResult};
+use g7tg_core::{ServiceStatus, SystemSnapshot, WebCheckResult};
 
 use crate::{
     config::AgentConfig,
@@ -18,22 +18,25 @@ pub async fn cycle(
     telegram: &TelegramClient,
 ) -> anyhow::Result<()> {
     let server_name = config.server_name.clone();
-    match tokio::task::spawn_blocking(move || system::collect(&server_name)).await {
-        Ok(snapshot) => {
-            store.reconcile_incidents_scoped(
-                &observe_system(config, &snapshot),
-                config.incident_confirmation_count,
-                &["system:", "disk:"],
-            )?;
-            reconcile_collector(store, config, "system", false)?;
-        }
-        Err(error) => {
-            tracing::warn!(error = %error, "시스템 상태 collector 실패");
-            reconcile_collector(store, config, "system", true)?;
-        }
-    }
+    let system_snapshot =
+        match tokio::task::spawn_blocking(move || system::collect(&server_name)).await {
+            Ok(snapshot) => {
+                store.reconcile_incidents_scoped(
+                    &observe_system(config, &snapshot),
+                    config.incident_confirmation_count,
+                    &["system:", "disk:"],
+                )?;
+                reconcile_collector(store, config, "system", false)?;
+                Some(snapshot)
+            }
+            Err(error) => {
+                tracing::warn!(error = %error, "시스템 상태 collector 실패");
+                reconcile_collector(store, config, "system", true)?;
+                None
+            }
+        };
 
-    match services::discover(&config.extra_service_units).await {
+    let service_statuses = match services::discover(&config.extra_service_units).await {
         Ok(service_statuses) => {
             store.reconcile_incidents_scoped(
                 &observe_services(&service_statuses),
@@ -41,14 +44,16 @@ pub async fn cycle(
                 &["service:"],
             )?;
             reconcile_collector(store, config, "services", false)?;
+            Some(service_statuses)
         }
         Err(error) => {
             tracing::warn!(error = %error, "서비스 상태 collector 실패");
             reconcile_collector(store, config, "services", true)?;
+            None
         }
-    }
+    };
 
-    match web::check_all(&config.web_checks).await {
+    let web_results = match web::check_all(&config.web_checks).await {
         Ok(web_results) => {
             store.reconcile_incidents_scoped(
                 &observe_web(config, &web_results),
@@ -56,12 +61,14 @@ pub async fn cycle(
                 &["web:", "tls:"],
             )?;
             reconcile_collector(store, config, "web", false)?;
+            Some(web_results)
         }
         Err(error) => {
             tracing::warn!(error = %error, "웹 상태 collector 실패");
             reconcile_collector(store, config, "web", true)?;
+            None
         }
-    }
+    };
 
     if store.silence_until()?.is_some() {
         let discarded = store.discard_pending_notifications()?;
@@ -96,7 +103,80 @@ pub async fn cycle(
         telegram.send_message(owner.chat_id, &text, None).await?;
         store.mark_notification_sent(notification.id)?;
     }
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    if store.status_digest_due(now)? {
+        let incidents = store.current_incidents()?;
+        let text = render_status_digest(
+            config,
+            system_snapshot.as_ref(),
+            service_statuses.as_deref(),
+            web_results.as_deref(),
+            incidents.len(),
+        );
+        telegram.send_message(owner.chat_id, &text, None).await?;
+        store.mark_status_digest_sent(now)?;
+    }
     Ok(())
+}
+
+fn render_status_digest(
+    config: &AgentConfig,
+    snapshot: Option<&SystemSnapshot>,
+    service_statuses: Option<&[ServiceStatus]>,
+    web_results: Option<&[WebCheckResult]>,
+    incident_count: usize,
+) -> String {
+    let now = time::OffsetDateTime::now_utc();
+    let mut lines = vec![
+        format!("[정기 상태] {}", config.server_name),
+        format!(
+            "점검: {:04}-{:02}-{:02} {:02}:{:02} UTC",
+            now.year(),
+            u8::from(now.month()),
+            now.day(),
+            now.hour(),
+            now.minute()
+        ),
+    ];
+    if let Some(snapshot) = snapshot {
+        let memory_percent = percent(snapshot.memory_used_bytes, snapshot.memory_total_bytes);
+        lines.push(format!(
+            "서버: CPU {:.1}% · RAM {:.1}% · Load {:.2}",
+            snapshot.cpu_usage_percent, memory_percent, snapshot.load_one
+        ));
+        if let Some((mount, usage_percent)) = snapshot
+            .disks
+            .iter()
+            .map(|disk| {
+                let used = disk.total_bytes.saturating_sub(disk.available_bytes);
+                (disk.mount_point.as_str(), percent(used, disk.total_bytes))
+            })
+            .max_by(|left, right| left.1.total_cmp(&right.1))
+        {
+            lines.push(format!("디스크: 최고 {mount} {usage_percent:.1}%"));
+        }
+    } else {
+        lines.push("서버: 수집 실패".to_owned());
+    }
+    if let Some(service_statuses) = service_statuses {
+        let healthy = service_statuses
+            .iter()
+            .filter(|service| service.is_healthy())
+            .count();
+        lines.push(format!("서비스: 정상 {healthy}/{}", service_statuses.len()));
+    } else {
+        lines.push("서비스: 수집 실패".to_owned());
+    }
+    match web_results {
+        Some([]) => lines.push("웹: 검사대상 없음".to_owned()),
+        Some(web_results) => {
+            let healthy = web_results.iter().filter(|result| result.healthy).count();
+            lines.push(format!("웹: 정상 {healthy}/{}", web_results.len()));
+        }
+        None => lines.push("웹: 수집 실패".to_owned()),
+    }
+    lines.push(format!("현재 장애: {incident_count}건"));
+    lines.join("\n")
 }
 
 fn reconcile_collector(
@@ -282,9 +362,9 @@ fn percent(used: u64, total: u64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use g7tg_core::SystemSnapshot;
+    use g7tg_core::{ServiceCategory, ServiceStatus, SystemSnapshot, WebCheckResult};
 
-    use super::observe;
+    use super::{observe, render_status_digest};
     use crate::config::AgentConfig;
 
     fn config() -> AgentConfig {
@@ -325,6 +405,34 @@ mod tests {
             swap_used_bytes: 0,
             disks: Vec::new(),
         }
+    }
+
+    #[test]
+    fn status_digest_summarizes_all_collectors() {
+        let services = vec![ServiceStatus {
+            unit: "nginx.service".to_owned(),
+            description: "Nginx".to_owned(),
+            category: ServiceCategory::Web,
+            load_state: "loaded".to_owned(),
+            active_state: "active".to_owned(),
+            sub_state: "running".to_owned(),
+        }];
+        let web = vec![WebCheckResult {
+            name: "대표 사이트".to_owned(),
+            url: "https://example.com/".to_owned(),
+            status_code: Some(200),
+            latency_ms: Some(20),
+            tls_days_remaining: Some(30),
+            healthy: true,
+            error_code: None,
+        }];
+        let text =
+            render_status_digest(&config(), Some(&snapshot()), Some(&services), Some(&web), 0);
+        assert!(text.contains("[정기 상태] demo"));
+        assert!(text.contains("서비스: 정상 1/1"));
+        assert!(text.contains("웹: 정상 1/1"));
+        assert!(text.contains("현재 장애: 0건"));
+        assert!(text.contains("UTC"));
     }
 
     #[test]

@@ -45,10 +45,11 @@ docker run --rm \
     sh -ceu '
         version=$1
         package=$2
+        debian_version=$(printf "%s\n" "$version" | sed "s/-/~/")
         scripts/check.sh
         cargo deb -p g7tg-agent
         built=$(find target/debian -maxdepth 1 -type f \
-            -name "g7telegram-devops_${version}-*_amd64.deb" -print -quit)
+            -name "g7telegram-devops_${debian_version}-*_amd64.deb" -print -quit)
         test -n "$built"
         cp "$built" "/dist/$package"
         scripts/check-package.sh "/dist/$package"

@@ -22,6 +22,11 @@ const APPROVAL_MAX_ROWS: i64 = 256;
 const INCIDENT_HISTORY_MAX_ROWS: i64 = 5_000;
 const OUTBOX_RETENTION_SECONDS: i64 = 7 * 86_400;
 const OUTBOX_MAX_ROWS: i64 = 1_000;
+const PAIRING_CODE_LENGTH: usize = 16;
+const PAIRING_FAILURE_LIMIT: i64 = 5;
+const PAIRING_FAILURE_WINDOW_SECONDS: i64 = 60;
+const PAIRING_BLOCK_SECONDS: i64 = 60;
+const STATUS_DIGEST_INTERVALS: [u64; 3] = [21_600, 43_200, 86_400];
 
 /// 등록된 Telegram owner입니다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,6 +118,14 @@ impl Store {
                     code_hash BLOB NOT NULL,
                     expires_at INTEGER NOT NULL,
                     replace_owner INTEGER NOT NULL DEFAULT 0 CHECK (replace_owner IN (0, 1))
+                );
+                CREATE TABLE IF NOT EXISTS pairing_attempts (
+                    actor_user_id INTEGER NOT NULL,
+                    chat_id INTEGER NOT NULL,
+                    window_started INTEGER NOT NULL,
+                    failure_count INTEGER NOT NULL,
+                    blocked_until INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY(actor_user_id, chat_id)
                 );
                 CREATE TABLE IF NOT EXISTS audit_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -213,7 +226,7 @@ impl Store {
             .simple()
             .to_string()
             .chars()
-            .take(8)
+            .take(PAIRING_CODE_LENGTH)
             .map(|character| character.to_ascii_uppercase())
             .collect();
         let code_hash = hash_code(&code);
@@ -235,6 +248,9 @@ impl Store {
                 ],
             )
             .context("pairing code 저장 실패")?;
+        connection
+            .execute("DELETE FROM pairing_attempts", [])
+            .context("pairing 실패 제한 초기화 실패")?;
         Ok(code)
     }
 
@@ -266,11 +282,29 @@ impl Store {
         let Some((stored_hash, expires_at, replace_owner)) = stored else {
             return Ok(false);
         };
+        let now = now_unix();
+        let blocked_until = transaction
+            .query_row(
+                "SELECT blocked_until FROM pairing_attempts \
+                 WHERE actor_user_id=?1 AND chat_id=?2",
+                params![user_id, chat_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .context("pairing 실패 제한 조회 실패")?
+            .unwrap_or(0);
+        if blocked_until > now {
+            return Ok(false);
+        }
         let candidate = hash_code(code.trim());
         let hash_matches: bool = stored_hash.as_slice().ct_eq(candidate.as_slice()).into();
         let owner_exists = metadata_i64_on(&transaction, "owner_user_id")?.is_some()
             || metadata_i64_on(&transaction, "owner_chat_id")?.is_some();
-        if expires_at < now_unix() || !hash_matches || (owner_exists && replace_owner != 1) {
+        if expires_at < now || !hash_matches || (owner_exists && replace_owner != 1) {
+            register_pairing_failure_on(&transaction, user_id, chat_id, now)?;
+            transaction
+                .commit()
+                .context("pairing 실패 제한 commit 실패")?;
             return Ok(false);
         }
 
@@ -279,6 +313,12 @@ impl Store {
         transaction
             .execute("DELETE FROM pairing WHERE singleton=1", [])
             .context("pairing code 소비 실패")?;
+        transaction
+            .execute(
+                "DELETE FROM pairing_attempts WHERE actor_user_id=?1 AND chat_id=?2",
+                params![user_id, chat_id],
+            )
+            .context("pairing 실패 제한 제거 실패")?;
         insert_audit_on(
             &transaction,
             Some(user_id),
@@ -317,6 +357,9 @@ impl Store {
         transaction
             .execute("DELETE FROM approvals", [])
             .context("승인 제거 실패")?;
+        transaction
+            .execute("DELETE FROM pairing_attempts", [])
+            .context("pairing 실패 제한 제거 실패")?;
         if existed {
             insert_audit_on(
                 &transaction,
@@ -738,6 +781,76 @@ impl Store {
             .context("silence 해제 transaction commit 실패")
     }
 
+    /// Telegram 정기 상태 요약 간격입니다. `None`이면 꺼짐입니다.
+    pub fn status_digest_interval_seconds(&self) -> anyhow::Result<Option<u64>> {
+        let Some(value) = self.metadata_i64("status_digest_interval_seconds")? else {
+            return Ok(None);
+        };
+        let interval = u64::try_from(value).context("정기 상태 요약 간격 변환 실패")?;
+        anyhow::ensure!(
+            STATUS_DIGEST_INTERVALS.contains(&interval),
+            "저장된 정기 상태 요약 간격이 허용 범위를 벗어났습니다"
+        );
+        Ok(Some(interval))
+    }
+
+    /// 정기 상태 요약을 꺼짐 또는 6·12·24시간 중 하나로 제한해 저장합니다.
+    pub fn set_status_digest_interval_seconds(&self, interval: Option<u64>) -> anyhow::Result<()> {
+        if let Some(interval) = interval {
+            anyhow::ensure!(
+                STATUS_DIGEST_INTERVALS.contains(&interval),
+                "허용되지 않은 정기 상태 요약 간격입니다"
+            );
+        }
+        let mut connection = self.lock()?;
+        let transaction = connection
+            .transaction()
+            .context("정기 상태 요약 설정 transaction 시작 실패")?;
+        match interval {
+            Some(interval) => {
+                set_metadata_on(
+                    &transaction,
+                    "status_digest_interval_seconds",
+                    &interval.to_string(),
+                )?;
+                set_metadata_on(
+                    &transaction,
+                    "status_digest_last_sent_at",
+                    &now_unix().to_string(),
+                )?;
+            }
+            None => {
+                transaction
+                    .execute(
+                        "DELETE FROM metadata WHERE key IN \
+                         ('status_digest_interval_seconds', 'status_digest_last_sent_at')",
+                        [],
+                    )
+                    .context("정기 상태 요약 설정 제거 실패")?;
+            }
+        }
+        transaction
+            .commit()
+            .context("정기 상태 요약 설정 commit 실패")
+    }
+
+    /// 지정 시각에 정기 상태 요약을 보낼 차례인지 확인합니다.
+    pub fn status_digest_due(&self, now: i64) -> anyhow::Result<bool> {
+        let Some(interval) = self.status_digest_interval_seconds()? else {
+            return Ok(false);
+        };
+        let interval = i64::try_from(interval).context("정기 상태 요약 간격 변환 실패")?;
+        let last_sent = self
+            .metadata_i64("status_digest_last_sent_at")?
+            .unwrap_or(now);
+        Ok(now.saturating_sub(last_sent) >= interval)
+    }
+
+    /// 성공적으로 전송한 정기 상태 요약의 시각을 기록합니다.
+    pub fn mark_status_digest_sent(&self, sent_at: i64) -> anyhow::Result<()> {
+        self.set_metadata("status_digest_last_sent_at", &sent_at.to_string())
+    }
+
     fn metadata_i64(&self, key: &str) -> anyhow::Result<Option<i64>> {
         let connection = self.lock()?;
         let value = connection
@@ -784,6 +897,61 @@ fn metadata_i64_on(connection: &Connection, key: &str) -> anyhow::Result<Option<
     value
         .map(|value| value.parse::<i64>().context("metadata 정수 변환 실패"))
         .transpose()
+}
+
+fn register_pairing_failure_on(
+    connection: &Connection,
+    user_id: i64,
+    chat_id: i64,
+    now: i64,
+) -> anyhow::Result<()> {
+    let previous = connection
+        .query_row(
+            "SELECT window_started, failure_count FROM pairing_attempts \
+             WHERE actor_user_id=?1 AND chat_id=?2",
+            params![user_id, chat_id],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+        )
+        .optional()
+        .context("pairing 실패 횟수 조회 실패")?;
+    let (window_started, failure_count) = match previous {
+        Some((window_started, failure_count))
+            if now.saturating_sub(window_started) < PAIRING_FAILURE_WINDOW_SECONDS =>
+        {
+            (window_started, failure_count.saturating_add(1))
+        }
+        _ => (now, 1),
+    };
+    let blocked_until = if failure_count >= PAIRING_FAILURE_LIMIT {
+        now.saturating_add(PAIRING_BLOCK_SECONDS)
+    } else {
+        0
+    };
+    connection
+        .execute(
+            "INSERT INTO pairing_attempts( \
+                actor_user_id, chat_id, window_started, failure_count, blocked_until \
+             ) VALUES(?1, ?2, ?3, ?4, ?5) \
+             ON CONFLICT(actor_user_id, chat_id) DO UPDATE SET \
+                window_started=excluded.window_started, \
+                failure_count=excluded.failure_count, \
+                blocked_until=excluded.blocked_until",
+            params![
+                user_id,
+                chat_id,
+                window_started,
+                failure_count,
+                blocked_until
+            ],
+        )
+        .context("pairing 실패 횟수 저장 실패")?;
+    connection
+        .execute(
+            "DELETE FROM pairing_attempts WHERE window_started < ?1",
+            [now.saturating_sub(86_400)],
+        )
+        .context("pairing 실패 제한 정리 실패")?;
+    Ok(())
 }
 
 fn ensure_pairing_replacement_column(connection: &Connection) -> anyhow::Result<()> {
@@ -1026,7 +1194,29 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&path)?;
-        assert_eq!(store.create_pairing_code(300)?.len(), 8);
+        assert_eq!(store.create_pairing_code(300)?.len(), 16);
+        Ok(())
+    }
+
+    #[test]
+    fn pairing_code_is_64_bit_and_failed_attempts_are_throttled() -> anyhow::Result<()> {
+        let directory = tempdir()?;
+        let store = Store::open(directory.path().join("state.sqlite3"))?;
+        let code = store.create_pairing_code(300)?;
+        assert_eq!(code.len(), 16);
+        for _ in 0..5 {
+            assert!(!store.consume_pairing_code("WRONG-CODE", 123, 456)?);
+        }
+        assert!(!store.consume_pairing_code(&code, 123, 456)?);
+
+        {
+            let connection = store.lock()?;
+            connection.execute(
+                "UPDATE pairing_attempts SET blocked_until=0 WHERE actor_user_id=123 AND chat_id=456",
+                [],
+            )?;
+        }
+        assert!(store.consume_pairing_code(&code, 123, 456)?);
         Ok(())
     }
 
@@ -1130,6 +1320,33 @@ mod tests {
         assert!(store.expired_silence_until()?.is_some());
         store.clear_silence()?;
         assert!(store.expired_silence_until()?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn status_digest_accepts_only_fixed_intervals_and_tracks_due_time() -> anyhow::Result<()> {
+        let directory = tempdir()?;
+        let store = Store::open(directory.path().join("state.sqlite3"))?;
+        assert_eq!(store.status_digest_interval_seconds()?, None);
+        assert!(
+            store
+                .set_status_digest_interval_seconds(Some(3600))
+                .is_err()
+        );
+
+        store.set_status_digest_interval_seconds(Some(21_600))?;
+        assert_eq!(store.status_digest_interval_seconds()?, Some(21_600));
+        assert!(!store.status_digest_due(now_unix())?);
+        store.set_metadata(
+            "status_digest_last_sent_at",
+            &now_unix().saturating_sub(21_601).to_string(),
+        )?;
+        assert!(store.status_digest_due(now_unix())?);
+        store.mark_status_digest_sent(now_unix())?;
+        assert!(!store.status_digest_due(now_unix())?);
+
+        store.set_status_digest_interval_seconds(None)?;
+        assert_eq!(store.status_digest_interval_seconds()?, None);
         Ok(())
     }
 

@@ -11,8 +11,19 @@
 간편 설치 명령은 GitHub Release의 `.deb`와 `SHA256SUMS`를 내려받아 일치할 때만 `apt`로 설치합니다.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7Telegram-devops/main/scripts/install.sh | sudo sh
+curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7Telegram-devops/main/scripts/install.sh \
+  | sudo G7TG_VERSION=0.6.1-beta.1 sh
 ```
+
+## Bot token 발급
+
+1. Telegram 공식 인증 계정 `@BotFather`와 개인채팅을 엽니다.
+2. `/newbot`을 보내고 Bot 표시 이름을 입력합니다.
+3. `bot`으로 끝나는 고유 username을 입력합니다. 예: `company_vps_devops_bot`
+4. 발급된 HTTP API token을 복사해 `sudo g7tg setup`의 숨김 입력란에만 붙여넣습니다.
+5. token 노출 시 BotFather에서 `/revoke`로 폐기한 뒤 새 token으로 `sudo g7tg setup`을 다시 실행합니다.
+
+VPS 한 대마다 Bot 하나를 권장합니다. token은 Telegram 대화, GitHub, TOML, 명령행에 넣지 않습니다. Agent는 private chat만 처리하므로 group privacy 설정 변경은 필요하지 않습니다.
 
 최초 설치는 초기설정 시작 여부를 묻고, 동의하면 `setup`을 같은 터미널에서 실행합니다. 업데이트 설치는 기존 token과 owner ID를 유지합니다. 초기설정을 건너뛰었다면 다음 명령으로 다시 시작합니다.
 
@@ -35,11 +46,13 @@ sudo g7tg setup
 
 사용자명이나 수동 입력한 숫자 ID는 신뢰하지 않습니다. Telegram이 전달한 실제 private chat 발신자 ID만 단회 연결코드와 함께 저장합니다. 연결 대기를 생략하려면 `--no-wait-for-pairing`을 사용합니다.
 
+연결코드는 16자리이며 5분 후 만료됩니다. 같은 Telegram user/chat이 1분 안에 5회 실패하면 1분 동안 추가 시도를 거부합니다.
+
 자동 설치에서 초기설정을 건너뛰려면 다음처럼 실행합니다.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7Telegram-devops/main/scripts/install.sh \
-  | sudo G7TG_SKIP_SETUP=1 sh
+  | sudo G7TG_VERSION=0.6.1-beta.1 G7TG_SKIP_SETUP=1 sh
 ```
 
 ## 상태 확인
@@ -93,17 +106,18 @@ sudo g7tg setup
 
 ## 업데이트와 롤백
 
-같은 설치 명령을 다시 실행하면 최신 Release checksum을 검증해 설치합니다. 설정된 서버에서는 Agent 재시작, `doctor`, 활성 상태 검증까지 통과해야 설치 성공으로 끝납니다.
+공개 Beta는 버전을 고정해 Release checksum을 검증하고 설치합니다. 설정된 서버에서는 Agent 재시작, `doctor`, 활성 상태 검증까지 통과해야 설치 성공으로 끝납니다.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7Telegram-devops/main/scripts/install.sh | sudo sh
+curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7Telegram-devops/main/scripts/install.sh \
+  | sudo G7TG_VERSION=0.6.1-beta.1 sh
 ```
 
 특정 버전 설치와 롤백은 `VERSION`을 지정합니다. 설정과 SQLite 상태는 유지됩니다.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7Telegram-devops/main/scripts/install.sh \
-  | sudo G7TG_VERSION=0.4.1 sh
+  | sudo G7TG_VERSION=0.6.1-beta.1 sh
 ```
 
 ## 관리자 로컬 릴리스와 배포
@@ -127,6 +141,10 @@ G7TG_DEPLOY_TARGET=g7devops scripts/release-local.sh
 - 자동 만료 시 현재 장애만 한 번의 요약으로 전송합니다.
 - 수동 해제 시 이전 대기 알림은 폐기하고 이후 관측부터 정상 전송합니다.
 - 감사로그는 최근 30일·최대 10,000건, 알림 outbox는 최근 7일·최대 1,000건으로 제한합니다.
+
+## Telegram 정기 상태 요약
+
+`메뉴 → 설정`에서 `꺼짐`(기본), `6시간`, `12시간`, `24시간` 중 하나를 선택합니다. 선택 시점부터 간격을 계산하며 서버 자원, 서비스, 웹 검사, 현재 장애 수와 UTC 점검시각을 보냅니다. 장애·복구 알림은 이 설정과 관계없이 즉시 전송하고 알림중지 중에는 정기 요약도 보내지 않습니다.
 
 ## 제거
 

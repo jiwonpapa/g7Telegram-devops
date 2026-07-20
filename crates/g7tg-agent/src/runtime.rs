@@ -268,6 +268,38 @@ async fn handle_callback(
         telegram.answer_callback(&callback.id, "적용됨").await?;
         return Ok(());
     }
+    if let Some(value) = data.strip_prefix("digest:") {
+        let interval = match value {
+            "off" => None,
+            "21600" => Some(21_600),
+            "43200" => Some(43_200),
+            "86400" => Some(86_400),
+            _ => {
+                telegram
+                    .answer_callback(&callback.id, "잘못된 정기 상태 요약 설정입니다.")
+                    .await?;
+                return Ok(());
+            }
+        };
+        store.set_status_digest_interval_seconds(interval)?;
+        store.audit(
+            Some(callback.from.id),
+            "status_digest_setting",
+            "success",
+            value,
+        )?;
+        let view = menu::render_settings(store.status_digest_interval_seconds()?);
+        telegram
+            .edit_message(
+                message.chat.id,
+                message.message_id,
+                &view.text,
+                view.keyboard,
+            )
+            .await?;
+        telegram.answer_callback(&callback.id, "적용됨").await?;
+        return Ok(());
+    }
     if let Some(rest) = data.strip_prefix("action:plan:") {
         return handle_action_plan(config, store, telegram, &callback, message, rest).await;
     }
@@ -291,6 +323,32 @@ async fn handle_callback(
             )
             .await?;
         telegram.answer_callback(&callback.id, "취소됨").await?;
+        return Ok(());
+    }
+    if let Some(page_value) = data.strip_prefix("menu:services:") {
+        let Ok(page) = page_value.parse::<usize>() else {
+            telegram
+                .answer_callback(&callback.id, "잘못된 서비스 페이지입니다.")
+                .await?;
+            return Ok(());
+        };
+        if page > 999 {
+            telegram
+                .answer_callback(&callback.id, "잘못된 서비스 페이지입니다.")
+                .await?;
+            return Ok(());
+        }
+        let inventory = services::discover(&config.extra_service_units).await?;
+        let view = menu::render_services_page(&inventory, page);
+        telegram
+            .edit_message(
+                message.chat.id,
+                message.message_id,
+                &view.text,
+                view.keyboard,
+            )
+            .await?;
+        telegram.answer_callback(&callback.id, "완료").await?;
         return Ok(());
     }
     if let Some(service_key) = data.strip_prefix("service:") {
@@ -345,6 +403,7 @@ async fn handle_callback(
             menu::render_web_checks(&results)
         }
         Menu::Alerts => menu::render_alerts(&store.current_incidents()?, store.silence_until()?),
+        Menu::Settings => menu::render_settings(store.status_digest_interval_seconds()?),
         _ => menu::render(target_menu, snapshot.as_ref()),
     };
     telegram
@@ -516,6 +575,7 @@ async fn send_new_menu(
             menu::render_web_checks(&results)
         }
         Menu::Alerts => menu::render_alerts(&store.current_incidents()?, store.silence_until()?),
+        Menu::Settings => menu::render_settings(store.status_digest_interval_seconds()?),
         _ => menu::render(target_menu, snapshot.as_ref()),
     };
     let keyboard = Some(serde_json::to_value(view.keyboard).context("메뉴 JSON 생성 실패")?);

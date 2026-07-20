@@ -50,11 +50,23 @@ if gh release view "$tag" >/dev/null 2>&1; then
     echo "GitHub Release already exists: $tag" >&2
     exit 1
 fi
-gh release create "$tag" \
-    "$package" \
-    dist/SHA256SUMS \
-    --generate-notes \
-    --verify-tag
+case "$version" in
+    *-*)
+        gh release create "$tag" \
+            "$package" \
+            dist/SHA256SUMS \
+            --generate-notes \
+            --verify-tag \
+            --prerelease
+        ;;
+    *)
+        gh release create "$tag" \
+            "$package" \
+            dist/SHA256SUMS \
+            --generate-notes \
+            --verify-tag
+        ;;
+esac
 
 echo "PASS: local release $tag"
 if [ -n "${G7TG_DEPLOY_TARGET:-}" ]; then

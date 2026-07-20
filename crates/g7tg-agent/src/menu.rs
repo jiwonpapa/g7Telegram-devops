@@ -8,6 +8,8 @@ use crate::{
     telegram::{InlineKeyboardButton, InlineKeyboardMarkup},
 };
 
+const SERVICE_PAGE_SIZE: usize = 8;
+
 /// 메뉴 화면의 text와 inline keyboard입니다.
 pub struct MenuView {
     /// 사용자에게 보낼 본문입니다.
@@ -43,7 +45,10 @@ pub fn render(menu: Menu, snapshot: Option<&SystemSnapshot>) -> MenuView {
                         button("웹 상태", "menu:web"),
                         button("장애/알림", "menu:alerts"),
                     ],
-                    vec![button("Agent 정보", "menu:info")],
+                    vec![
+                        button("설정", "menu:settings"),
+                        button("Agent 정보", "menu:info"),
+                    ],
                 ],
             },
         },
@@ -57,6 +62,7 @@ pub fn render(menu: Menu, snapshot: Option<&SystemSnapshot>) -> MenuView {
         Menu::Services => placeholder("서비스", "다음 배치에서 자동 탐지를 연결합니다."),
         Menu::Web => placeholder("웹 상태", "HTTP/TLS 검증 배치에서 연결합니다."),
         Menu::Alerts => placeholder("장애/알림", "현재 등록된 장애가 없습니다."),
+        Menu::Settings => render_settings(None),
         Menu::Info => MenuView {
             text: format!(
                 "G7Telegram DevOps\nTelegram으로 서버 상태와 웹·서비스를 확인하고, 장애 알림과 승인형 재시작을 제공하는 서버 관리 앱입니다.\n버전: {}",
@@ -70,6 +76,12 @@ pub fn render(menu: Menu, snapshot: Option<&SystemSnapshot>) -> MenuView {
 /// 탐지한 서비스 목록을 분류해 render합니다.
 #[must_use]
 pub fn render_services(services: &[ServiceStatus]) -> MenuView {
+    render_services_page(services, 0)
+}
+
+/// 탐지한 서비스 목록의 지정 페이지를 render합니다.
+#[must_use]
+pub fn render_services_page(services: &[ServiceStatus], requested_page: usize) -> MenuView {
     if services.is_empty() {
         return MenuView {
             text: "서비스\n관리 대상 웹서비스를 발견하지 못했습니다.".to_owned(),
@@ -80,13 +92,19 @@ pub fn render_services(services: &[ServiceStatus]) -> MenuView {
         .iter()
         .filter(|service| service.is_healthy())
         .count();
+    let page_count = services.len().div_ceil(SERVICE_PAGE_SIZE);
+    let page = requested_page.min(page_count.saturating_sub(1));
+    let start = page.saturating_mul(SERVICE_PAGE_SIZE);
+    let end = start.saturating_add(SERVICE_PAGE_SIZE).min(services.len());
     let mut lines = vec![format!(
-        "서비스 상태\n정상 {healthy}개 · 확인필요 {}개",
+        "서비스 상태 · {}/{}\n정상 {healthy}개 · 확인필요 {}개",
+        page + 1,
+        page_count,
         services.len().saturating_sub(healthy)
     )];
     let mut rows = Vec::new();
     let mut previous_category = None;
-    for service in services.iter().take(24) {
+    for service in &services[start..end] {
         if previous_category != Some(service.category) {
             lines.push(format!("\n[{}]", service.category.label()));
             previous_category = Some(service.category);
@@ -97,20 +115,60 @@ pub fn render_services(services: &[ServiceStatus]) -> MenuView {
             &format!("service:{}", crate::services::service_key(&service.unit)),
         )]);
     }
-    if services.len() > 24 {
-        lines.push(format!(
-            "\n외 {}개는 화면 한도로 생략했습니다.",
-            services.len() - 24
-        ));
+    let mut navigation = Vec::new();
+    if page > 0 {
+        navigation.push(button("이전", &format!("menu:services:{}", page - 1)));
+    }
+    if page + 1 < page_count {
+        navigation.push(button("다음", &format!("menu:services:{}", page + 1)));
+    }
+    if !navigation.is_empty() {
+        rows.push(navigation);
     }
     rows.push(vec![
-        button("새로고침", "menu:services"),
+        button("새로고침", &format!("menu:services:{page}")),
         button("뒤로가기", "menu:main"),
     ]);
     MenuView {
         text: lines.join("\n"),
         keyboard: InlineKeyboardMarkup {
             inline_keyboard: rows,
+        },
+    }
+}
+
+/// 정기 상태 요약의 제한된 Telegram 설정 화면입니다.
+#[must_use]
+pub fn render_settings(status_digest_interval_seconds: Option<u64>) -> MenuView {
+    let current = match status_digest_interval_seconds {
+        Some(21_600) => "6시간",
+        Some(43_200) => "12시간",
+        Some(86_400) => "24시간",
+        _ => "꺼짐",
+    };
+    let selected = |seconds: Option<u64>, label: &str| {
+        if status_digest_interval_seconds == seconds {
+            format!("✓ {label}")
+        } else {
+            label.to_owned()
+        }
+    };
+    MenuView {
+        text: format!(
+            "설정\n정기 상태 요약: {current}\n\n장애·복구 알림은 항상 즉시 전송합니다. 정기 요약은 선택한 간격으로 자원·서비스·웹 상태를 알려드립니다."
+        ),
+        keyboard: InlineKeyboardMarkup {
+            inline_keyboard: vec![
+                vec![
+                    button(&selected(None, "꺼짐"), "digest:off"),
+                    button(&selected(Some(21_600), "6시간"), "digest:21600"),
+                ],
+                vec![
+                    button(&selected(Some(43_200), "12시간"), "digest:43200"),
+                    button(&selected(Some(86_400), "24시간"), "digest:86400"),
+                ],
+                vec![button("뒤로가기", "menu:main")],
+            ],
         },
     }
 }
@@ -369,8 +427,21 @@ fn format_system_snapshot(snapshot: &SystemSnapshot) -> String {
         format!("HOST   {}", compact_text(&snapshot.hostname, 32)),
         format!("OS     {}", compact_text(&snapshot.os_name, 32)),
         format!("KERN   {}", compact_text(&snapshot.kernel_version, 32)),
+        format!("CHECK  {}", checked_at_utc()),
     ]);
     lines.join("\n")
+}
+
+fn checked_at_utc() -> String {
+    let now = time::OffsetDateTime::now_utc();
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02} UTC",
+        now.year(),
+        u8::from(now.month()),
+        now.day(),
+        now.hour(),
+        now.minute()
+    )
 }
 
 fn placeholder(title: &str, body: &str) -> MenuView {
@@ -449,7 +520,10 @@ mod tests {
         DiskSnapshot, Menu, ServiceAction, ServiceCategory, ServiceStatus, SystemSnapshot,
     };
 
-    use super::{render, render_action_confirmation, render_service_detail};
+    use super::{
+        render, render_action_confirmation, render_service_detail, render_services_page,
+        render_settings,
+    };
 
     #[test]
     fn system_menu_has_refresh_and_back() {
@@ -494,6 +568,8 @@ mod tests {
                 .any(|line| line.starts_with("/boot/efi") && line.ends_with("6M/100M   6.0%"))
         );
         assert!(!view.text.contains('~'));
+        assert!(view.text.contains("CHECK"));
+        assert!(view.text.contains("UTC"));
         assert!(view.text.lines().all(|line| line.chars().count() <= 30));
         assert_eq!(view.keyboard.inline_keyboard[0].len(), 2);
 
@@ -510,6 +586,54 @@ mod tests {
                 .lines()
                 .any(|line| line.starts_with(long_mount) && line.ends_with("5.0G/10.0G  50.0%"))
         );
+    }
+
+    #[test]
+    fn service_list_is_paginated_without_omission() {
+        let services: Vec<_> = (0..18)
+            .map(|index| ServiceStatus {
+                unit: format!("demo-{index}.service"),
+                description: format!("Demo {index}"),
+                category: ServiceCategory::Application,
+                load_state: "loaded".to_owned(),
+                active_state: "active".to_owned(),
+                sub_state: "running".to_owned(),
+            })
+            .collect();
+        let first = render_services_page(&services, 0);
+        assert!(first.text.contains("1/3"));
+        assert!(first.text.contains("demo-0.service"));
+        assert!(!first.text.contains("demo-8.service"));
+        assert!(
+            first
+                .keyboard
+                .inline_keyboard
+                .iter()
+                .flatten()
+                .any(|button| { button.callback_data == "menu:services:1" })
+        );
+
+        let last = render_services_page(&services, 2);
+        assert!(last.text.contains("3/3"));
+        assert!(last.text.contains("demo-17.service"));
+        assert!(!last.text.contains("생략"));
+    }
+
+    #[test]
+    fn settings_exposes_only_fixed_digest_intervals() {
+        let view = render_settings(Some(43_200));
+        assert!(view.text.contains("정기 상태 요약: 12시간"));
+        let callbacks: Vec<_> = view
+            .keyboard
+            .inline_keyboard
+            .iter()
+            .flatten()
+            .map(|button| button.callback_data.as_str())
+            .collect();
+        assert!(callbacks.contains(&"digest:off"));
+        assert!(callbacks.contains(&"digest:21600"));
+        assert!(callbacks.contains(&"digest:43200"));
+        assert!(callbacks.contains(&"digest:86400"));
     }
 
     #[test]

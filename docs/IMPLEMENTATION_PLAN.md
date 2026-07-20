@@ -55,3 +55,12 @@
 - `VPS_PASS`: Ubuntu 22.04/24.04 2GB VPS
 - 일반 웹서버와 G7 관련 서비스 표면 각각 검증
 - RSS, idle CPU, SQLite 크기 gate
+
+## 배치 7 — 공개 베타 UX·보안 보강
+
+- 연결코드 16자리 강화와 user/chat별 실패 횟수 제한
+- 서비스 8개 단위 이전/다음 페이지 이동
+- 서버 상태 마지막 UTC 점검시각
+- Telegram 설정의 6·12·24시간 정기 상태 요약
+- BotFather token 발급·폐기·교체 문서화
+- prerelease 로컬 릴리스와 `g7devops` 배포 검증

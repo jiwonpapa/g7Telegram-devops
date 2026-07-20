@@ -16,6 +16,8 @@ pub enum Menu {
     Web,
     /// 현재 장애와 silence입니다.
     Alerts,
+    /// Telegram에서 변경할 수 있는 제한된 알림 설정입니다.
+    Settings,
     /// Agent와 서버 정보입니다.
     Info,
 }
@@ -30,6 +32,7 @@ impl Menu {
             "menu:services" => Some(Self::Services),
             "menu:web" => Some(Self::Web),
             "menu:alerts" => Some(Self::Alerts),
+            "menu:settings" => Some(Self::Settings),
             "menu:info" => Some(Self::Info),
             _ => None,
         }

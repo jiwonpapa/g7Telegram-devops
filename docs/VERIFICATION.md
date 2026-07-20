@@ -2,10 +2,10 @@
 
 검증 수준을 섞어 표현하지 않습니다.
 
-| 수준 | 확인 범위 | 자동 gate |
+| 수준 | 확인 범위 | 로컬 gate |
 |---|---|---|
-| `CODE_ONLY` | Rust format, Clippy, unit/fixture test | 모든 push와 Release |
-| `AUTO_PASS` | Ubuntu 22.04 빌드, `.deb` 구조·권한, Ubuntu 22.04/24.04 설치·실행 | 2GB 제한 Docker smoke |
+| `CODE_ONLY` | Rust format, Clippy, unit/fixture test, dependency audit, ShellCheck | `scripts/verify-local.sh` |
+| `AUTO_PASS` | Ubuntu 22.04 amd64 빌드, `.deb` 구조·권한, Ubuntu 22.04/24.04 설치·실행 | `scripts/build-package-local.sh`의 2GB 제한 Docker smoke |
 | `VPS_PASS` | 실제 Bot pairing, 장시간 idle 자원, 실제 systemd restart와 알림 왕복 | 운영 VPS에서 별도 수행 |
 
 ## 자동 자원 gate
@@ -18,6 +18,8 @@
 - 패키지 재시작 실패 전파, downgrade 허용, 설치 후 health gate 정적 검사
 
 이 gate는 저사양 설치 적합성을 확인하지만, 실제 Bot token과 운영 서비스가 필요한 `VPS_PASS`를 대신하지 않습니다.
+
+GitHub Actions는 사용하지 않습니다. `scripts/release-local.sh`가 로컬 gate를 모두 다시 통과한 경우에만 태그와 GitHub Release를 생성합니다.
 
 ## VPS 검증 절차
 

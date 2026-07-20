@@ -20,7 +20,7 @@ Ubuntu VPS 한 대와 Telegram Bot 한 개를 직접 연결하는 로컬 우선 
 
 ## 배포 원칙
 
-정식 산출물은 GitHub Release의 `.deb`입니다. 설치 스크립트는 Release에서 `.deb`와 checksum을 내려받아 검증한 뒤 `apt`로 설치합니다. 서버에서는 Rust를 빌드하지 않습니다.
+정식 산출물은 GitHub Release의 `.deb`입니다. GitHub Actions는 사용하지 않습니다. 개발자 로컬 Docker에서 검사·Ubuntu 22.04 amd64 빌드·Ubuntu 22.04/24.04 2GB 설치 검증을 수행한 뒤 GitHub Release에는 완성된 파일만 업로드합니다. 서버에서는 Rust를 빌드하지 않습니다.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7Telegram-devops/main/scripts/install.sh | sudo sh
@@ -48,5 +48,13 @@ sudo g7tg setup
 ## 로컬 개발
 
 ```bash
-scripts/check.sh
+scripts/verify-local.sh
+scripts/build-package-local.sh
+```
+
+버전 변경을 커밋한 뒤 로컬에서 정식 릴리스를 생성합니다. `G7TG_DEPLOY_TARGET`을 지정하면 Release 생성 후 해당 VPS까지 배포합니다.
+
+```bash
+scripts/release-local.sh
+G7TG_DEPLOY_TARGET=g7devops scripts/release-local.sh
 ```

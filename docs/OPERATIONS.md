@@ -106,6 +106,21 @@ curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7Telegram-devops/main/sc
   | sudo G7TG_VERSION=0.4.1 sh
 ```
 
+## 관리자 로컬 릴리스와 배포
+
+GitHub Actions는 사용하지 않습니다. 깨끗한 `main`에서 로컬 검사, Ubuntu 22.04 amd64 패키지 빌드, Ubuntu 22.04/24.04 2GB 스모크, 태그와 GitHub Release 생성을 한 번에 수행합니다.
+
+```bash
+scripts/release-local.sh
+scripts/deploy-local.sh g7devops
+```
+
+릴리스 직후 배포까지 연결할 수도 있습니다.
+
+```bash
+G7TG_DEPLOY_TARGET=g7devops scripts/release-local.sh
+```
+
 ## 알림중지와 데이터 보존
 
 - 알림중지 중 발생·복구한 개별 알림은 지연 전송하지 않습니다.

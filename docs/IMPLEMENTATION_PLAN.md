@@ -5,7 +5,7 @@
 ## 배치 0 — 기본선
 
 - Git 저장소와 원격 연결
-- Rust workspace, 품질 lint, CI
+- Rust workspace, 품질 lint, 로컬 검증 파이프라인
 - 제품 범위, 아키텍처, 보안 경계
 - 설정 계약과 SQLite schema 기본선
 
@@ -44,6 +44,7 @@
 - Ubuntu 22.04+ systemd unit
 - `.deb` package, post-install/pre-remove
 - GitHub Release checksum과 설치 스크립트
+- GitHub Actions 없는 로컬 빌드·릴리스·VPS 배포
 - token rotation, update, rollback, uninstall
 - owner 안전 교체·해제, 설치 후 restart/doctor health gate
 

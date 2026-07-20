@@ -144,6 +144,7 @@ async fn main() -> anyhow::Result<()> {
             };
             println!("Telegram에서 다음 연결 코드를 보내십시오: {code}");
             println!("유효시간: {ttl_seconds}초");
+            setup::print_pairing_response_guidance();
             if replace {
                 println!("새 owner가 코드를 사용할 때까지 기존 owner는 유지됩니다.");
             }

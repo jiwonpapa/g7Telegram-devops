@@ -22,6 +22,17 @@ use crate::{
 
 const ALLOWLIST_PATH: &str = "/etc/g7telegram-devops/allowed-units";
 const SECRET_PATH: &str = "/etc/g7telegram-devops/secrets/bot-token";
+const PAIRING_RESPONSE_GUIDANCE: [&str; 2] = [
+    "Telegram 응답은 Agent 시작과 네트워크 상태에 따라 수초 걸릴 수 있습니다.",
+    "10초 뒤에도 답장이 없으면 같은 연결코드를 한 번 다시 보내십시오.",
+];
+
+/// 연결코드 전송 뒤 정상적인 대기와 안전한 재시도 기준을 안내합니다.
+pub(crate) fn print_pairing_response_guidance() {
+    for line in PAIRING_RESPONSE_GUIDANCE {
+        println!("{line}");
+    }
+}
 
 /// 비밀값과 안전한 자동 탐지 결과를 원자 저장하고 service를 시작합니다.
 pub async fn run(
@@ -97,6 +108,7 @@ pub async fn run(
     if let Some(pairing_code) = pairing_code {
         println!("Telegram Bot에 다음 연결코드를 보내십시오: {pairing_code}");
         println!("연결코드 유효시간: {pairing_ttl_seconds}초");
+        print_pairing_response_guidance();
         if !no_start && !no_wait_for_pairing {
             println!("Telegram owner 연결을 기다립니다...");
             match wait_for_owner(&store, pairing_ttl_seconds).await? {

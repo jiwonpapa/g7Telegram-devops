@@ -33,7 +33,7 @@ curl -fsSL https://github.com/jiwonpapa/g7Telegram-devops/raw/main/install.sh | 
 
 ### 3. Telegram 연결
 
-서버 콘솔에 16자리 연결코드가 표시되면 5분 안에 생성한 Bot의 **개인채팅에 연결코드만** 보냅니다. `연결 완료`와 Telegram의 `메뉴` 버튼이 보이면 설치가 끝난 것입니다.
+서버 콘솔에 16자리 연결코드가 표시되면 5분 안에 생성한 Bot의 **개인채팅에 연결코드만** 보냅니다. Agent 시작과 네트워크 상태에 따라 답장이 수초 늦을 수 있습니다. **10초 동안 답장이 없으면 같은 연결코드를 한 번만 다시 보내십시오.** 새 코드를 바로 발급하거나 코드를 연속 전송할 필요는 없습니다. `연결 완료`와 Telegram의 `메뉴` 버튼이 보이면 설치가 끝난 것입니다.
 
 <details>
 <summary>실제 서버 콘솔 설치 화면 보기</summary>
@@ -55,10 +55,12 @@ Telegram Bot 확인: 회사 VPS 관리봇 (ID 1234567890)
 웹 상태 검사: https://example.com/
 Telegram Bot에 다음 연결코드를 보내십시오: ABCD1234EF567890
 연결코드 유효시간: 300초
+Telegram 응답은 Agent 시작과 네트워크 상태에 따라 수초 걸릴 수 있습니다.
+10초 뒤에도 답장이 없으면 같은 연결코드를 한 번 다시 보내십시오.
 Telegram owner 연결을 기다립니다...
 ```
 
-이 상태에서 Telegram Bot 개인채팅에 `ABCD1234EF567890`을 보냅니다.
+이 상태에서 Telegram Bot 개인채팅에 `ABCD1234EF567890`을 보냅니다. 10초 후에도 답장이 없을 때만 같은 코드를 한 번 더 보냅니다.
 
 ```console
 Telegram owner 연결 완료: user ID 123456789, chat ID 123456789

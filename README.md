@@ -1,6 +1,9 @@
 # G7Telegram DevOps
 
-> 공개 베타 `v0.6.1-beta.2`: 실제 서버에 설치할 수 있지만 아직 `1.0` 정식판은 아닙니다.
+> [!WARNING]
+> **무보증 및 책임 제한:** 이 공개 Beta는 Apache License 2.0에 따라 **있는 그대로(AS IS)** 제공되며 특정 목적 적합성, 무중단 운영이나 오류 없음이 보증되지 않습니다. 서버 점검·서비스 재시작 과정에서 중단, 설정 오류 또는 데이터 손실이 발생할 수 있으므로 사용자가 사전 백업과 비핵심 서버 검증을 수행해야 합니다. 관련 법률이 허용하는 범위에서 저작권자와 기여자는 사용 또는 사용 불능으로 발생한 손해를 책임지지 않습니다. 설치기는 이 고지를 표시하고 `Y`로 확인한 경우에만 진행합니다.
+
+> 공개 베타 `v0.6.1-beta.3`: 실제 서버에 설치할 수 있지만 아직 `1.0` 정식판은 아닙니다.
 
 Ubuntu VPS 한 대를 Telegram Bot 하나와 연결해 서버 상태, 웹 상태, 서비스 장애를 확인하고 승인 후 서비스를 재시작하는 관리 도구입니다. 중앙 관제 서버는 필요하지 않습니다.
 
@@ -25,7 +28,7 @@ sudo apt-get install -y curl ca-certificates
 curl -fsSL https://github.com/jiwonpapa/g7Telegram-devops/raw/main/install.sh | sudo sh
 ```
 
-설치 중에는 다음 세 가지만 입력합니다.
+책임 제한 고지와 초기설정 진행 여부를 확인한 뒤 다음 세 정보만 입력합니다.
 
 - `서버 이름`: Telegram에 표시할 이름입니다. 기본값을 쓰려면 Enter를 누릅니다.
 - `Telegram Bot token`: BotFather에서 받은 token을 붙여넣습니다. 숨김 입력이라 화면에 표시되지 않습니다.
@@ -44,7 +47,13 @@ curl -fsSL https://github.com/jiwonpapa/g7Telegram-devops/raw/main/install.sh | 
 $ ssh ubuntu@서버주소
 
 ubuntu@my-vps:~$ curl -fsSL https://github.com/jiwonpapa/g7Telegram-devops/raw/main/install.sh | sudo sh
-g7telegram-devops_0.6.1-beta.2_amd64.deb: OK
+[중요: 무보증 및 책임 제한]
+G7Telegram DevOps 공개 Beta는 Apache-2.0에 따라 '있는 그대로' 제공됩니다.
+서비스 중단, 설정 오류, 데이터 손실 등 사용에 따른 위험은 사용자가 검토하고 부담합니다.
+사용 전 백업과 비핵심 서버 검증을 권장합니다.
+관련 법률이 허용하는 범위에서 저작권자와 기여자는 사용으로 인한 손해를 책임지지 않습니다.
+위 내용을 확인했으며 설치를 계속하시겠습니까? [y/N] y
+g7telegram-devops_0.6.1-beta.3_amd64.deb: OK
 [apt 패키지 설치 로그]
 지금 Telegram 초기설정을 시작하시겠습니까? [Y/n] y
 서버 이름 [my-vps]:
@@ -66,7 +75,7 @@ Telegram owner 연결을 기다립니다...
 Telegram owner 연결 완료: user ID 123456789, chat ID 123456789
 PASS: configuration for my-vps (paired)
 Agent health: PASS
-Installed g7telegram-devops_0.6.1-beta.2_amd64.deb
+Installed g7telegram-devops_0.6.1-beta.3_amd64.deb
 ```
 
 </details>
@@ -81,7 +90,7 @@ systemctl is-active g7tg-agent.service
 
 정상 기준은 다음과 같습니다.
 
-- 버전: `g7tg 0.6.1-beta.2`
+- 버전: `g7tg 0.6.1-beta.3`
 - 설정 검사: `PASS`
 - 서비스: `active`
 - Telegram: 개인채팅에 `메뉴` 버튼 표시
@@ -196,3 +205,7 @@ rm -f g7tg-install.sh
 - [보안 검토 보고서](docs/SECURITY_REVIEW.md)
 - [단계별 구현계획](docs/IMPLEMENTATION_PLAN.md)
 - [검증 기준](docs/VERIFICATION.md)
+
+## 라이선스
+
+Copyright 2026 G7Telegram DevOps Contributors. 이 프로젝트는 [Apache License 2.0](LICENSE)으로 배포합니다. 전체 무보증·책임 제한은 라이선스 제7조와 제8조를 따릅니다. 배포물에는 [NOTICE](NOTICE)를 함께 포함해야 합니다.

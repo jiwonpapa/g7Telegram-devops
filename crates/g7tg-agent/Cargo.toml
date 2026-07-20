@@ -4,6 +4,7 @@ description = "Menu-driven one-to-one Telegram agent for Ubuntu web server opera
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 publish.workspace = true
 
 [[bin]]
@@ -61,4 +62,6 @@ assets = [
     ["../../packaging/libexec/g7tg-exec", "usr/lib/g7telegram-devops/g7tg-exec", "755"],
     ["../../packaging/systemd/g7tg-agent.service", "usr/lib/systemd/system/g7tg-agent.service", "644"],
     ["../../packaging/sudoers/g7telegram-devops", "etc/sudoers.d/g7telegram-devops", "440"],
+    ["../../LICENSE", "usr/share/doc/g7telegram-devops/LICENSE", "644"],
+    ["../../NOTICE", "usr/share/doc/g7telegram-devops/NOTICE", "644"],
 ]

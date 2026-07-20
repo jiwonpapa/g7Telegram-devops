@@ -1,7 +1,7 @@
 # 공개 베타 보안 검토 보고서
 
 검토일: 2026-07-20
-대상: `main` v0.6.1-beta.2 source, `.deb` 패키지, `g7devops` Ubuntu 24.04 운영 인스턴스
+대상: `main` v0.6.1-beta.3 source, `.deb` 패키지와 기존 `g7devops` Ubuntu 24.04 운영 검증
 
 ## 요약
 

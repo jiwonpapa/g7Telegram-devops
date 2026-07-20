@@ -17,6 +17,8 @@
 - 이전 SQLite schema 자동 migration, owner 안전 교체, 16자리 pairing과 실패 제한
 - 서비스 pagination, 정기 상태 요약 허용값·주기 계산, scoped collector 대조, bounded 감사로그
 - 최상위 installer 기본 버전과 Cargo 버전 일치, 기존 installer URL 호환 wrapper ShellCheck
+- Apache-2.0 메타데이터와 LICENSE·NOTICE의 `.deb` 포함 여부
+- 설치 전 책임 제한 `Y/N` 확인, 비대화형 기본 거부와 관리자 자동화의 명시적 동의값
 - 패키지 재시작 실패 전파, downgrade 허용, 설치 후 health gate 정적 검사
 
 이 gate는 저사양 설치 적합성을 확인하지만, 실제 Bot token과 운영 서비스가 필요한 `VPS_PASS`를 대신하지 않습니다.

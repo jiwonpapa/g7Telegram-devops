@@ -22,7 +22,9 @@ for required in \
     usr/lib/systemd/system/g7tg-agent.service \
     etc/g7telegram-devops/agent.toml \
     etc/g7telegram-devops/allowed-units \
-    etc/sudoers.d/g7telegram-devops
+    etc/sudoers.d/g7telegram-devops \
+    usr/share/doc/g7telegram-devops/LICENSE \
+    usr/share/doc/g7telegram-devops/NOTICE
 do
     [ -f "$root/$required" ] || {
         echo "missing package asset: $required" >&2

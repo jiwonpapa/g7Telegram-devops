@@ -2,10 +2,11 @@
 set -eu
 
 REPOSITORY=jiwonpapa/g7Telegram-devops
-DEFAULT_RELEASE_VERSION=0.6.1-beta.2
+DEFAULT_RELEASE_VERSION=0.6.1-beta.3
 requested_version=${G7TG_VERSION:-$DEFAULT_RELEASE_VERSION}
 skip_setup=${G7TG_SKIP_SETUP:-0}
 force_setup=${G7TG_RUN_SETUP:-0}
+accept_disclaimer=${G7TG_ACCEPT_DISCLAIMER:-0}
 configured=0
 [ -s /etc/g7telegram-devops/secrets/bot-token ] && configured=1
 tty_available=0
@@ -37,6 +38,37 @@ case "$(/usr/bin/dpkg --print-architecture)" in
         exit 1
         ;;
 esac
+
+print_disclaimer() {
+    /usr/bin/printf '%s\n' \
+        '[중요: 무보증 및 책임 제한]' \
+        "G7Telegram DevOps 공개 Beta는 Apache-2.0에 따라 '있는 그대로' 제공됩니다." \
+        '서비스 중단, 설정 오류, 데이터 손실 등 사용에 따른 위험은 사용자가 검토하고 부담합니다.' \
+        '사용 전 백업과 비핵심 서버 검증을 권장합니다.' \
+        '관련 법률이 허용하는 범위에서 저작권자와 기여자는 사용으로 인한 손해를 책임지지 않습니다.'
+}
+
+if [ "$accept_disclaimer" = 1 ]; then
+    print_disclaimer
+    echo 'G7TG_ACCEPT_DISCLAIMER=1로 책임 제한 고지를 확인했습니다.'
+elif [ "$tty_available" = 1 ]; then
+    print_disclaimer > /dev/tty
+    /usr/bin/printf '위 내용을 확인했으며 설치를 계속하시겠습니까? [y/N] ' > /dev/tty
+    disclaimer_answer=
+    IFS= read -r disclaimer_answer < /dev/tty || disclaimer_answer=n
+    case "$disclaimer_answer" in
+        y|Y|yes|YES) ;;
+        *)
+            echo '설치를 취소했습니다. 시스템은 변경되지 않았습니다.' > /dev/tty
+            exit 0
+            ;;
+    esac
+else
+    print_disclaimer >&2
+    echo '대화형 Y/N 확인이 필요합니다.' >&2
+    echo '자동화에서는 G7TG_ACCEPT_DISCLAIMER=1을 명시하십시오.' >&2
+    exit 77
+fi
 
 version=${requested_version#v}
 /usr/bin/printf '%s\n' "$version" \

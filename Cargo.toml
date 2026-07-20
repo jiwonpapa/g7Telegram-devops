@@ -6,11 +6,12 @@ members = [
 ]
 
 [workspace.package]
-version = "0.6.1-beta.2"
+version = "0.6.1-beta.3"
 edition = "2024"
 rust-version = "1.96.0"
 authors = ["G7Telegram DevOps Contributors"]
 repository = "https://github.com/jiwonpapa/g7Telegram-devops"
+license = "Apache-2.0"
 publish = false
 
 [workspace.dependencies]

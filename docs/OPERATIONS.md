@@ -15,6 +15,8 @@ SSH 접속부터 Bot 연결과 정상 확인까지의 간단한 흐름은 [READM
 curl -fsSL https://github.com/jiwonpapa/g7Telegram-devops/raw/main/install.sh | sudo sh
 ```
 
+설치기는 패키지를 내려받거나 시스템을 변경하기 전에 Apache-2.0의 무보증·책임 제한을 표시합니다. `Y` 또는 `y`로 확인한 경우에만 설치하며 `N`, Enter 또는 그 밖의 입력은 변경 없이 종료합니다. 이 확인은 최초 설치와 업데이트에 모두 적용됩니다.
+
 최상위 `install.sh`가 현재 공개 Beta 버전을 내부에서 선택하므로 일반 사용자는 버전을 입력하지 않습니다. 기존 `scripts/install.sh` URL은 이전 문서와 자동화의 호환을 위해 유지합니다.
 
 ## Bot token 발급
@@ -54,8 +56,10 @@ sudo g7tg setup
 
 ```bash
 curl -fsSL https://github.com/jiwonpapa/g7Telegram-devops/raw/main/install.sh \
-  | sudo G7TG_SKIP_SETUP=1 sh
+  | sudo env G7TG_ACCEPT_DISCLAIMER=1 G7TG_SKIP_SETUP=1 sh
 ```
+
+`G7TG_ACCEPT_DISCLAIMER=1`은 대화형 입력이 불가능한 관리자 자동화에서만 사용합니다. 책임 제한 고지를 사전에 검토하고 명시적으로 확인한 자동화에만 설정하십시오.
 
 ## 상태 확인
 
@@ -120,7 +124,7 @@ curl -fsSL https://github.com/jiwonpapa/g7Telegram-devops/raw/main/install.sh | 
 
 ```bash
 curl -fsSL https://github.com/jiwonpapa/g7Telegram-devops/raw/main/install.sh \
-  | sudo G7TG_VERSION=0.6.1-beta.2 sh
+  | sudo G7TG_VERSION=0.6.1-beta.3 sh
 ```
 
 ## 관리자 로컬 릴리스와 배포

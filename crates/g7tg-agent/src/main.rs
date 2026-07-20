@@ -17,6 +17,7 @@ mod storage;
 mod system;
 mod telegram;
 mod tls;
+mod ui;
 mod web;
 
 /// G7Telegram DevOps Agent CLI입니다.

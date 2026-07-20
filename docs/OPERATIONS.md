@@ -71,7 +71,7 @@ sudo g7tg doctor
 
 `doctor`는 실제 적용 중인 감시 주기와 임계값을 함께 출력합니다. 기본값은 60초마다 검사하고 같은 문제가 2회 연속 관측될 때 알림을 확정합니다.
 
-Telegram의 서버 상태 화면은 Telegram 기본 글꼴로 표시합니다. 디스크 열은 현재 마운트 경로 중 가장 긴 값에 맞춰 불필요한 공백을 제거하며, 각 경로와 사용량을 한 줄로 보냅니다. 기본 글꼴은 비고정폭이므로 기기에 따라 열 정렬이 조금 달라질 수 있습니다.
+Telegram의 서버 상태 화면은 Telegram 기본 글꼴로 표시합니다. `🟢 정상`, `🟡 주의`, `🔴 장애`, `⚪ 미설정·미감지` 아이콘을 자원 임계값과 서비스·웹 검사 결과에 맞춰 표시합니다. 디스크 열은 현재 마운트 경로 중 가장 긴 값에 맞춰 불필요한 공백을 제거하며, 각 경로와 사용량을 한 줄로 보냅니다. 기본 글꼴은 비고정폭이므로 기기에 따라 열 정렬이 조금 달라질 수 있습니다.
 
 - CPU 사용률 90% 이상
 - 논리 CPU 한 개당 1분 Load Average 1.5 이상
@@ -124,7 +124,7 @@ curl -fsSL https://github.com/jiwonpapa/g7Telegram-devops/raw/main/install.sh | 
 
 ```bash
 curl -fsSL https://github.com/jiwonpapa/g7Telegram-devops/raw/main/install.sh \
-  | sudo G7TG_VERSION=0.6.1-beta.3 sh
+  | sudo G7TG_VERSION=0.6.1-beta.4 sh
 ```
 
 ## 관리자 로컬 릴리스와 배포

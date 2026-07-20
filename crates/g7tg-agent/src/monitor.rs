@@ -8,7 +8,7 @@ use crate::{
     storage::{ObservedIncident, Store},
     system,
     telegram::TelegramClient,
-    web,
+    ui, web,
 };
 
 /// 한 번의 monitoring, incident 대조, outbox 전송을 수행합니다.
@@ -91,14 +91,16 @@ pub async fn cycle(
         return Ok(());
     };
     for notification in store.pending_notifications(20)? {
-        let heading = if notification.kind == "opened" {
-            "장애 발생"
+        let (icon, heading) = if notification.kind == "opened" {
+            (ui::severity_status(&notification.severity), "장애 발생")
         } else {
-            "복구"
+            (ui::HEALTHY, "복구 완료")
         };
         let text = format!(
-            "[{heading}] {}\n등급: {}\n{}",
-            config.server_name, notification.severity, notification.summary
+            "{icon} {heading} · {}\n등급: {}\n{}",
+            config.server_name,
+            ui::severity_label(&notification.severity),
+            notification.summary
         );
         telegram.send_message(owner.chat_id, &text, None).await?;
         store.mark_notification_sent(notification.id)?;
@@ -111,7 +113,7 @@ pub async fn cycle(
             system_snapshot.as_ref(),
             service_statuses.as_deref(),
             web_results.as_deref(),
-            incidents.len(),
+            &incidents,
         );
         telegram.send_message(owner.chat_id, &text, None).await?;
         store.mark_status_digest_sent(now)?;
@@ -124,13 +126,13 @@ fn render_status_digest(
     snapshot: Option<&SystemSnapshot>,
     service_statuses: Option<&[ServiceStatus]>,
     web_results: Option<&[WebCheckResult]>,
-    incident_count: usize,
+    incidents: &[crate::storage::CurrentIncident],
 ) -> String {
     let now = time::OffsetDateTime::now_utc();
     let mut lines = vec![
-        format!("[정기 상태] {}", config.server_name),
+        format!("📊 정기 상태 · {}", config.server_name),
         format!(
-            "점검: {:04}-{:02}-{:02} {:02}:{:02} UTC",
+            "🕒 점검: {:04}-{:02}-{:02} {:02}:{:02} UTC",
             now.year(),
             u8::from(now.month()),
             now.day(),
@@ -140,8 +142,17 @@ fn render_status_digest(
     ];
     if let Some(snapshot) = snapshot {
         let memory_percent = percent(snapshot.memory_used_bytes, snapshot.memory_total_bytes);
+        let resource_incidents = observe_system(config, snapshot);
+        let status_icon = if resource_incidents
+            .iter()
+            .any(|incident| incident.severity == "critical")
+        {
+            ui::CRITICAL
+        } else {
+            ui::resource_status(!resource_incidents.is_empty())
+        };
         lines.push(format!(
-            "서버: CPU {:.1}% · RAM {:.1}% · Load {:.2}",
+            "{status_icon} 서버: CPU {:.1}% · RAM {:.1}% · Load {:.2}",
             snapshot.cpu_usage_percent, memory_percent, snapshot.load_one
         ));
         if let Some((mount, usage_percent)) = snapshot
@@ -153,29 +164,55 @@ fn render_status_digest(
             })
             .max_by(|left, right| left.1.total_cmp(&right.1))
         {
-            lines.push(format!("디스크: 최고 {mount} {usage_percent:.1}%"));
+            lines.push(format!(
+                "{} 디스크: 최고 {mount} {usage_percent:.1}%",
+                ui::disk_status(usage_percent, config.disk_warning_percent)
+            ));
         }
     } else {
-        lines.push("서버: 수집 실패".to_owned());
+        lines.push("🔴 서버: 수집 실패".to_owned());
     }
     if let Some(service_statuses) = service_statuses {
         let healthy = service_statuses
             .iter()
             .filter(|service| service.is_healthy())
             .count();
-        lines.push(format!("서비스: 정상 {healthy}/{}", service_statuses.len()));
+        let icon = if healthy == service_statuses.len() {
+            ui::HEALTHY
+        } else {
+            ui::CRITICAL
+        };
+        lines.push(format!(
+            "{icon} 서비스: 정상 {healthy}/{}",
+            service_statuses.len()
+        ));
     } else {
-        lines.push("서비스: 수집 실패".to_owned());
+        lines.push("🔴 서비스: 수집 실패".to_owned());
     }
     match web_results {
-        Some([]) => lines.push("웹: 검사대상 없음".to_owned()),
+        Some([]) => lines.push("⚪ 웹: 검사대상 없음".to_owned()),
         Some(web_results) => {
             let healthy = web_results.iter().filter(|result| result.healthy).count();
-            lines.push(format!("웹: 정상 {healthy}/{}", web_results.len()));
+            let icon = if healthy == web_results.len() {
+                ui::HEALTHY
+            } else {
+                ui::CRITICAL
+            };
+            lines.push(format!("{icon} 웹: 정상 {healthy}/{}", web_results.len()));
         }
-        None => lines.push("웹: 수집 실패".to_owned()),
+        None => lines.push("🔴 웹: 수집 실패".to_owned()),
     }
-    lines.push(format!("현재 장애: {incident_count}건"));
+    let incident_icon = if incidents
+        .iter()
+        .any(|incident| incident.severity == "critical")
+    {
+        ui::CRITICAL
+    } else if incidents.is_empty() {
+        ui::HEALTHY
+    } else {
+        ui::WARNING
+    };
+    lines.push(format!("{incident_icon} 현재 장애: {}건", incidents.len()));
     lines.join("\n")
 }
 
@@ -207,23 +244,25 @@ fn render_silence_digest(
 ) -> String {
     if incidents.is_empty() {
         return format!(
-            "[알림중지 종료] {}\n현재 확인된 장애가 없습니다.",
+            "🔔 알림중지 종료 · {}\n🟢 현재 확인된 장애가 없습니다.",
             config.server_name
         );
     }
     let mut lines = vec![format!(
-        "[알림중지 종료] {}\n현재 장애 {}건",
+        "🔔 알림중지 종료 · {}\n🚨 현재 장애 {}건",
         config.server_name,
         incidents.len()
     )];
-    lines.extend(
-        incidents
-            .iter()
-            .take(10)
-            .map(|incident| format!("- [{}] {}", incident.severity, incident.summary)),
-    );
+    lines.extend(incidents.iter().take(10).map(|incident| {
+        format!(
+            "{} [{}] {}",
+            ui::severity_status(&incident.severity),
+            ui::severity_label(&incident.severity),
+            incident.summary
+        )
+    }));
     if incidents.len() > 10 {
-        lines.push(format!("- 그 외 {}건", incidents.len() - 10));
+        lines.push(format!("⚪ 그 외 {}건", incidents.len() - 10));
     }
     lines.join("\n")
 }
@@ -426,12 +465,17 @@ mod tests {
             healthy: true,
             error_code: None,
         }];
-        let text =
-            render_status_digest(&config(), Some(&snapshot()), Some(&services), Some(&web), 0);
-        assert!(text.contains("[정기 상태] demo"));
-        assert!(text.contains("서비스: 정상 1/1"));
-        assert!(text.contains("웹: 정상 1/1"));
-        assert!(text.contains("현재 장애: 0건"));
+        let text = render_status_digest(
+            &config(),
+            Some(&snapshot()),
+            Some(&services),
+            Some(&web),
+            &[],
+        );
+        assert!(text.contains("📊 정기 상태 · demo"));
+        assert!(text.contains("🟢 서비스: 정상 1/1"));
+        assert!(text.contains("🟢 웹: 정상 1/1"));
+        assert!(text.contains("🟢 현재 장애: 0건"));
         assert!(text.contains("UTC"));
     }
 

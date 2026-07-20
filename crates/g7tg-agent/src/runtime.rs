@@ -169,7 +169,7 @@ async fn handle_message(
         telegram
             .send_message(
                 message.chat.id,
-                "연결되었습니다. 아래 메뉴 버튼으로 서버를 관리하세요.",
+                "✅ 연결되었습니다. 아래 메뉴 버튼으로 서버를 관리하세요.",
                 Some(menu::persistent_menu_keyboard()),
             )
             .await?;
@@ -191,7 +191,7 @@ async fn handle_message(
             telegram
                 .send_message(
                     owner.chat_id,
-                    "아래 메뉴 버튼을 사용하세요.",
+                    "ℹ️ 아래 메뉴 버튼을 사용하세요.",
                     Some(menu::persistent_menu_keyboard()),
                 )
                 .await?;
@@ -201,7 +201,7 @@ async fn handle_message(
         telegram
             .send_message(
                 owner.chat_id,
-                "지원하지 않는 입력입니다. 아래의 메뉴 버튼을 선택하세요.",
+                "ℹ️ 지원하지 않는 입력입니다. 아래의 메뉴 버튼을 선택하세요.",
                 Some(menu::persistent_menu_keyboard()),
             )
             .await?;
@@ -400,11 +400,11 @@ async fn handle_callback(
         }
         Menu::Web => {
             let results = crate::web::check_all(&config.web_checks).await?;
-            menu::render_web_checks(&results)
+            menu::render_web_checks(&results, &config.web_checks)
         }
         Menu::Alerts => menu::render_alerts(&store.current_incidents()?, store.silence_until()?),
         Menu::Settings => menu::render_settings(store.status_digest_interval_seconds()?),
-        _ => menu::render(target_menu, snapshot.as_ref()),
+        _ => menu::render(target_menu, snapshot.as_ref(), config),
     };
     telegram
         .edit_message(
@@ -572,11 +572,11 @@ async fn send_new_menu(
         }
         Menu::Web => {
             let results = crate::web::check_all(&config.web_checks).await?;
-            menu::render_web_checks(&results)
+            menu::render_web_checks(&results, &config.web_checks)
         }
         Menu::Alerts => menu::render_alerts(&store.current_incidents()?, store.silence_until()?),
         Menu::Settings => menu::render_settings(store.status_digest_interval_seconds()?),
-        _ => menu::render(target_menu, snapshot.as_ref()),
+        _ => menu::render(target_menu, snapshot.as_ref(), config),
     };
     let keyboard = Some(serde_json::to_value(view.keyboard).context("메뉴 JSON 생성 실패")?);
     telegram.send_message(chat_id, &view.text, keyboard).await?;

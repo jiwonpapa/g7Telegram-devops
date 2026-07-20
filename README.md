@@ -86,6 +86,69 @@ curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7Telegram-devops/main/sc
   | sudo G7TG_VERSION=0.6.1-beta.1 sh
 ```
 
+### 서버 콘솔에서 설치 따라하기
+
+아래 예시는 새 VPS에 SSH로 접속해 설치하고 Telegram owner 연결까지 마치는 실제 CLI 흐름입니다. `$` 뒤의 명령만 입력하십시오. 패키지 설치 로그와 Bot 이름·ID·연결코드는 서버마다 달라질 수 있습니다.
+
+```console
+$ ssh ubuntu@서버주소
+
+ubuntu@my-vps:~$ sudo apt-get update
+ubuntu@my-vps:~$ sudo apt-get install -y curl ca-certificates
+
+ubuntu@my-vps:~$ curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7Telegram-devops/main/scripts/install.sh \
+>   | sudo G7TG_VERSION=0.6.1-beta.1 sh
+
+g7telegram-devops_0.6.1-beta.1_amd64.deb: OK
+[apt 패키지 설치 로그]
+지금 Telegram 초기설정을 시작하시겠습니까? [Y/n] y
+Server name [my-vps]: my-vps
+Telegram Bot token: [입력해도 화면에 표시되지 않음]
+Telegram Bot 확인: 회사 VPS 관리봇 (ID 1234567890)
+Web status URL (optional, Enter=skip): https://example.com
+설정 완료: my-vps
+웹 상태 검사: https://example.com/
+Telegram Bot에 다음 연결코드를 보내십시오: ABCD1234EF567890
+연결코드 유효시간: 300초
+Telegram owner 연결을 기다립니다...
+```
+
+여기서 Telegram을 열고 생성한 Bot의 **개인채팅에 화면의 연결코드만** 보냅니다. 연결되면 서버 콘솔이 다음처럼 완료됩니다.
+
+```console
+Telegram owner 연결 완료: user ID 123456789, chat ID 123456789
+PASS: configuration for my-vps (paired)
+Monitoring: 60s interval, 2 consecutive confirmations
+Thresholds: CPU 90.0%, Load 1.50/CPU, Memory 90.0%, Swap 80.0% with memory pressure, Disk 85.0%
+Agent health: PASS
+Installed g7telegram-devops_0.6.1-beta.1_amd64.deb
+```
+
+대표 웹 주소를 검사하지 않으려면 `Web status URL` 질문에서 Enter를 누릅니다. 초기설정 질문에서 `n`을 선택했거나 연결 대기시간이 끝났다면 다음 명령으로 다시 진행합니다.
+
+```console
+ubuntu@my-vps:~$ sudo g7tg setup
+```
+
+설치가 끝난 뒤 다음 명령으로 버전·설정·서비스·로그를 확인합니다.
+
+```console
+ubuntu@my-vps:~$ g7tg --version
+g7tg 0.6.1-beta.1
+
+ubuntu@my-vps:~$ sudo g7tg doctor
+PASS: configuration for my-vps (paired)
+Monitoring: 60s interval, 2 consecutive confirmations
+Thresholds: CPU 90.0%, Load 1.50/CPU, Memory 90.0%, Swap 80.0% with memory pressure, Disk 85.0%
+
+ubuntu@my-vps:~$ systemctl is-active g7tg-agent.service
+active
+
+ubuntu@my-vps:~$ sudo journalctl -u g7tg-agent.service --since today --no-pager
+```
+
+정상 기준은 `doctor`의 `PASS`, systemd의 `active`, Telegram 개인채팅의 `메뉴` 버튼입니다. token 오류가 발생하면 BotFather에서 token을 다시 복사해 `sudo g7tg setup`을 실행하십시오. token을 명령행에 직접 넣지는 마십시오.
+
 설치 스크립트는 다음 순서로 동작합니다.
 
 1. root 권한, Ubuntu 22.04 이상, `amd64` 여부를 확인합니다.

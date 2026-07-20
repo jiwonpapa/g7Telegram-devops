@@ -9,6 +9,7 @@
 ## 설치
 
 간편 설치 명령은 GitHub Release의 `.deb`와 `SHA256SUMS`를 내려받아 일치할 때만 `apt`로 설치합니다.
+SSH 접속부터 Bot 연결과 정상 확인까지의 실제 콘솔 입력 예시는 [README CLI 설치 도움말](../README.md#서버-콘솔에서-설치-따라하기)을 참고하십시오.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7Telegram-devops/main/scripts/install.sh \

@@ -5,6 +5,8 @@
 
 > 공개 베타 `v0.6.1-beta.3`: 실제 서버에 설치할 수 있지만 아직 `1.0` 정식판은 아닙니다.
 
+![G7 Telegram DevOps - Telegram으로 관리하는 쉬운 Ubuntu VPS 관제](docs/assets/g7telegram-devops-hero-network.webp)
+
 Ubuntu VPS 한 대를 Telegram Bot 하나와 연결해 서버 상태, 웹 상태, 서비스 장애를 확인하고 승인 후 서비스를 재시작하는 관리 도구입니다. 중앙 관제 서버는 필요하지 않습니다.
 
 ## 5분 설치
@@ -205,6 +207,7 @@ rm -f g7tg-install.sh
 - [보안 검토 보고서](docs/SECURITY_REVIEW.md)
 - [단계별 구현계획](docs/IMPLEMENTATION_PLAN.md)
 - [검증 기준](docs/VERIFICATION.md)
+- [홍보 이미지 3종](docs/assets/README.md)
 
 ## 라이선스
 

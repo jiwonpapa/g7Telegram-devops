@@ -12,7 +12,7 @@ service_actions_enabled = false
 action_executor = "/usr/lib/g7telegram-devops/g7tg-exec"
 approval_ttl_seconds = 45
 
-# sudo g7tg setup에서만 변경합니다. 기본값은 false입니다.
+# sudo g7tg power enable|disable로 변경합니다. 최초 setup 기본값은 false입니다.
 server_reboot_enabled = false
 
 monitor_interval_seconds = 60

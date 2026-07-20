@@ -26,7 +26,7 @@ pub async fn can_reboot(executor: &str) -> anyhow::Result<bool> {
 pub async fn execute_reboot(executor: &str) -> anyhow::Result<()> {
     ensure!(
         can_reboot(executor).await?,
-        "서버 재시작이 로컬 setup에서 허용되지 않았습니다"
+        "서버 재시작이 로컬 power 설정에서 허용되지 않았습니다"
     );
     let output = tokio::time::timeout(
         Duration::from_secs(15),

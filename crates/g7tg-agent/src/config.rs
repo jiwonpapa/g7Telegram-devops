@@ -98,6 +98,36 @@ impl AgentConfig {
         toml::to_string_pretty(self).context("설정 TOML serialize 실패")
     }
 
+    /// 기존 주석과 다른 설정을 유지하면서 최상위 서버 재시작 설정만 변경합니다.
+    pub fn with_server_reboot_enabled(body: &str, enabled: bool) -> anyhow::Result<String> {
+        let replacement = format!("server_reboot_enabled = {enabled}");
+        let mut lines: Vec<String> = body.lines().map(str::to_owned).collect();
+        let table_start = lines
+            .iter()
+            .position(|line| line.trim_start().starts_with('['))
+            .unwrap_or(lines.len());
+        let existing = lines[..table_start].iter().position(|line| {
+            line.split_once('=')
+                .is_some_and(|(key, _)| key.trim() == "server_reboot_enabled")
+        });
+        if let Some(index) = existing {
+            lines[index] = replacement;
+        } else {
+            lines.insert(table_start, replacement);
+        }
+        let mut updated = lines.join("\n");
+        if body.ends_with('\n') {
+            updated.push('\n');
+        }
+        let config: Self = toml::from_str(&updated).context("변경된 설정 TOML 검증 실패")?;
+        config.validate()?;
+        ensure!(
+            config.server_reboot_enabled == enabled,
+            "server reboot 설정 변경 검증 실패"
+        );
+        Ok(updated)
+    }
+
     /// 운영 가능한 최소 불변조건을 확인합니다.
     pub fn validate(&self) -> anyhow::Result<()> {
         ensure!(
@@ -354,5 +384,30 @@ bot_token_file = "/run/credentials/token"
             tls_warning_days: 14,
         };
         assert!(check.validate().is_err());
+    }
+
+    #[test]
+    fn reboot_setting_update_preserves_comments_and_top_level_scope() -> anyhow::Result<()> {
+        let body = r#"# keep this comment
+server_name = "demo"
+bot_token_file = "/run/credentials/token"
+
+[[web_checks]]
+name = "main"
+url = "https://example.com/"
+"#;
+        let enabled = AgentConfig::with_server_reboot_enabled(body, true)?;
+        assert!(enabled.contains("# keep this comment"));
+        let setting_index = enabled
+            .find("server_reboot_enabled = true")
+            .ok_or_else(|| anyhow::anyhow!("server reboot setting 누락"))?;
+        let table_index = enabled
+            .find("[[web_checks]]")
+            .ok_or_else(|| anyhow::anyhow!("web check table 누락"))?;
+        assert!(setting_index < table_index);
+        let disabled = AgentConfig::with_server_reboot_enabled(&enabled, false)?;
+        assert_eq!(disabled.matches("server_reboot_enabled =").count(), 1);
+        assert!(disabled.contains("server_reboot_enabled = false"));
+        Ok(())
     }
 }

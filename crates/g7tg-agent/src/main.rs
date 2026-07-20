@@ -21,6 +21,8 @@ mod tls;
 mod ui;
 mod web;
 
+const SYSTEM_CONFIG_PATH: &str = "/etc/g7telegram-devops/agent.toml";
+
 /// G7Telegram DevOps Agent CLI입니다.
 #[derive(Debug, Parser)]
 #[command(name = "g7tg", version, about = "Telegram 기반 1:1 VPS 관리 Agent")]
@@ -56,6 +58,12 @@ enum Command {
         #[arg(long)]
         confirm: bool,
     },
+    /// 전체 초기설정 없이 Telegram 서버 재시작 권한만 관리합니다.
+    Power {
+        /// 실행할 전원 관리 명령입니다.
+        #[command(subcommand)]
+        command: PowerCommand,
+    },
     /// Bot token·서버 이름·서비스 allowlist·systemd를 대화형 설정합니다.
     Setup {
         /// Telegram 화면에 표시할 서버 이름입니다.
@@ -74,6 +82,17 @@ enum Command {
         #[arg(long)]
         no_wait_for_pairing: bool,
     },
+}
+
+/// 로컬에서만 변경 가능한 Telegram 서버 재시작 권한입니다.
+#[derive(Debug, Subcommand)]
+enum PowerCommand {
+    /// 서버 재시작 메뉴와 root helper 권한을 활성화합니다.
+    Enable,
+    /// 서버 재시작 메뉴와 root helper 권한을 비활성화합니다.
+    Disable,
+    /// 설정과 root helper의 현재 상태를 확인합니다.
+    Status,
 }
 
 #[tokio::main]
@@ -100,7 +119,7 @@ async fn main() -> anyhow::Result<()> {
             let reboot_executor_ready = power::can_reboot(&config.action_executor).await?;
             anyhow::ensure!(
                 reboot_executor_ready == config.server_reboot_enabled,
-                "서버 재시작 설정과 root helper 허용 상태가 일치하지 않습니다. sudo g7tg setup을 다시 실행하십시오"
+                "서버 재시작 설정과 root helper 허용 상태가 일치하지 않습니다. sudo g7tg power enable 또는 disable로 복구하십시오"
             );
             let owner = store.owner()?;
             let owner_state = if owner.is_some() {
@@ -177,6 +196,46 @@ async fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
+        Command::Power { command } => {
+            config.validate()?;
+            match command {
+                PowerCommand::Enable => {
+                    ensure_root("서버 재시작 기능 활성화")?;
+                    ensure_system_config_path(&cli.config)?;
+                    setup::set_server_reboot_enabled(&cli.config, &mut config, true).await
+                }
+                PowerCommand::Disable => {
+                    ensure_root("서버 재시작 기능 비활성화")?;
+                    ensure_system_config_path(&cli.config)?;
+                    setup::set_server_reboot_enabled(&cli.config, &mut config, false).await
+                }
+                PowerCommand::Status => {
+                    let helper_enabled = power::can_reboot(&config.action_executor).await?;
+                    println!(
+                        "Telegram 서버 재시작: {}",
+                        if config.server_reboot_enabled {
+                            "사용"
+                        } else {
+                            "사용 안 함"
+                        }
+                    );
+                    println!(
+                        "Root helper: {}",
+                        if helper_enabled {
+                            "enabled"
+                        } else {
+                            "disabled"
+                        }
+                    );
+                    anyhow::ensure!(
+                        helper_enabled == config.server_reboot_enabled,
+                        "설정과 root helper 상태가 일치하지 않습니다. power enable 또는 disable로 복구하십시오"
+                    );
+                    println!("상태 확인: PASS");
+                    Ok(())
+                }
+            }
+        }
         Command::Setup {
             server_name,
             web_url,
@@ -209,4 +268,52 @@ fn ensure_root(operation: &str) -> anyhow::Result<()> {
         "{operation}은 root 권한이 필요합니다"
     );
     Ok(())
+}
+
+fn ensure_system_config_path(path: &std::path::Path) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        path == std::path::Path::new(SYSTEM_CONFIG_PATH),
+        "power enable/disable은 시스템 설정 {SYSTEM_CONFIG_PATH}에서만 허용됩니다"
+    );
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::{Cli, Command, PowerCommand, ensure_system_config_path};
+
+    #[test]
+    fn power_commands_are_dedicated_subcommands() -> anyhow::Result<()> {
+        for (argument, expected) in [("enable", true), ("disable", false)] {
+            let cli = Cli::try_parse_from(["g7tg", "power", argument])?;
+            match cli.command {
+                Command::Power {
+                    command: PowerCommand::Enable,
+                } => assert!(expected),
+                Command::Power {
+                    command: PowerCommand::Disable,
+                } => assert!(!expected),
+                _ => return Err(anyhow::anyhow!("power 하위 명령 parse 실패")),
+            }
+        }
+        let cli = Cli::try_parse_from(["g7tg", "power", "status"])?;
+        assert!(matches!(
+            cli.command,
+            Command::Power {
+                command: PowerCommand::Status
+            }
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn power_mutation_rejects_non_system_config() {
+        assert!(ensure_system_config_path(std::path::Path::new("/tmp/agent.toml")).is_err());
+        assert!(
+            ensure_system_config_path(std::path::Path::new("/etc/g7telegram-devops/agent.toml"))
+                .is_ok()
+        );
+    }
 }

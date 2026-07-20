@@ -21,6 +21,7 @@
 - 설치 전 책임 제한 `Y/N` 확인, 비대화형 기본 거부와 관리자 자동화의 명시적 동의값
 - 패키지 재시작 실패 전파, downgrade 허용, 설치 후 health gate 정적 검사
 - 서버 재시작 기본 비활성, root 소유 허용파일 형식·권한, exact sudoers와 60초 단회 확인문구 검사
+- `g7tg power enable|status|disable`이 token 재입력 없이 기존 설정 주석을 보존하는지 package 왕복 검사
 
 이 gate는 저사양 설치 적합성을 확인하지만, 실제 Bot token과 운영 서비스가 필요한 `VPS_PASS`를 대신하지 않습니다.
 

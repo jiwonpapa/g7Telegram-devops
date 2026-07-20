@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use crate::{
     config::{AgentConfig, WebCheckConfig},
-    services,
+    power, services,
     storage::{Owner, Store},
     telegram::TelegramClient,
 };
@@ -33,6 +33,51 @@ pub(crate) fn print_pairing_response_guidance() {
     for line in PAIRING_RESPONSE_GUIDANCE {
         println!("{line}");
     }
+}
+
+/// 다른 초기설정은 건드리지 않고 서버 재시작 권한만 변경합니다.
+pub(crate) async fn set_server_reboot_enabled(
+    config_path: &Path,
+    config: &mut AgentConfig,
+    enabled: bool,
+) -> anyhow::Result<()> {
+    config.validate()?;
+    let previous_enabled = config.server_reboot_enabled;
+    let previous_helper_enabled = power::can_reboot(&config.action_executor).await?;
+
+    if previous_enabled != enabled || previous_helper_enabled != enabled {
+        let original_body = fs::read_to_string(config_path).context("기존 설정 read 실패")?;
+        let updated_body = AgentConfig::with_server_reboot_enabled(&original_body, enabled)?;
+        if let Err(error) = configure_reboot_sentinel(enabled) {
+            let _ = configure_reboot_sentinel(previous_helper_enabled);
+            return Err(error.context("server reboot 허용 상태 변경 실패"));
+        }
+        if let Err(error) = write_config(config_path, &updated_body) {
+            let config_rollback = write_config(config_path, &original_body);
+            let sentinel_rollback = configure_reboot_sentinel(previous_helper_enabled);
+            if config_rollback.is_err() || sentinel_rollback.is_err() {
+                return Err(error.context(
+                    "server reboot 설정 저장과 rollback에 실패했습니다. sudo g7tg doctor로 확인하십시오",
+                ));
+            }
+            return Err(error.context("server reboot 설정 저장 실패"));
+        }
+        config.server_reboot_enabled = enabled;
+    }
+
+    run_checked("systemctl", &["restart", "g7tg-agent.service"]).await?;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    run_checked("systemctl", &["is-active", "--quiet", "g7tg-agent.service"]).await?;
+    ensure!(
+        power::can_reboot(&config.action_executor).await? == enabled,
+        "변경 후 server reboot helper 검증 실패"
+    );
+    println!(
+        "Telegram 서버 재시작: {}",
+        if enabled { "사용" } else { "사용 안 함" }
+    );
+    println!("Agent 재시작 및 상태 확인: PASS");
+    Ok(())
 }
 
 /// 비밀값과 안전한 자동 탐지 결과를 원자 저장하고 service를 시작합니다.
@@ -231,6 +276,11 @@ fn configure_reboot_sentinel(enabled: bool) -> anyhow::Result<()> {
         fs::remove_file(path).context("server reboot 허용 파일 제거 실패")?;
     }
     Ok(())
+}
+
+fn write_config(path: &Path, body: &str) -> anyhow::Result<()> {
+    write_atomic(path, body, 0o640)?;
+    set_owner_and_mode(path, "root:g7tg-agent", "0640")
 }
 
 fn normalized_web_url(input: &str) -> anyhow::Result<String> {

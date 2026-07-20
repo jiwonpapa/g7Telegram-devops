@@ -227,7 +227,7 @@ async fn handle_reboot_phrase(
         telegram
             .send_message(
                 owner.chat_id,
-                "⚪ 서버 재시작 기능이 비활성화되어 있습니다. 서버 콘솔에서 sudo g7tg setup을 실행해야 활성화할 수 있습니다.",
+                "⚪ 서버 재시작 기능이 비활성화되어 있습니다. 서버 콘솔에서 sudo g7tg power enable을 실행해야 활성화할 수 있습니다.",
                 None,
             )
             .await?;

@@ -51,6 +51,35 @@ output="$temporary/output"
     "$output"
 /usr/bin/grep -F -x -q 'Server reboot: disabled' "$output"
 
+power_output="$temporary/power-output"
+/usr/bin/g7tg --config /etc/g7telegram-devops/agent.toml power status >"$power_output"
+/usr/bin/grep -F -x -q 'Telegram 서버 재시작: 사용 안 함' "$power_output"
+/usr/bin/grep -F -x -q 'Root helper: disabled' "$power_output"
+
+# systemd가 없는 package container에서는 고정 성공 stub으로 CLI 설정 왕복만 검증합니다.
+fake_bin="$temporary/fake-bin"
+/usr/bin/mkdir -p "$fake_bin"
+/usr/bin/printf '#!/bin/sh\nexit 0\n' >"$fake_bin/systemctl"
+/usr/bin/chmod 0755 "$fake_bin/systemctl"
+PATH="$fake_bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+    /usr/bin/g7tg --config /etc/g7telegram-devops/agent.toml power enable \
+    >"$power_output"
+/usr/bin/grep -F -x -q 'Telegram 서버 재시작: 사용' "$power_output"
+/usr/bin/grep -F -x -q 'Agent 재시작 및 상태 확인: PASS' "$power_output"
+/usr/bin/grep -F -x -q '# local-config-must-survive-upgrade' \
+    /etc/g7telegram-devops/agent.toml
+/usr/bin/grep -F -x -q 'server_reboot_enabled = true' \
+    /etc/g7telegram-devops/agent.toml
+/usr/sbin/runuser -u g7tg-agent -- \
+    /usr/lib/g7telegram-devops/g7tg-exec check-reboot
+PATH="$fake_bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+    /usr/bin/g7tg --config /etc/g7telegram-devops/agent.toml power disable \
+    >"$power_output"
+/usr/bin/grep -F -x -q 'Telegram 서버 재시작: 사용 안 함' "$power_output"
+/usr/bin/grep -F -x -q 'server_reboot_enabled = false' \
+    /etc/g7telegram-devops/agent.toml
+[ ! -e /etc/g7telegram-devops/allow-server-reboot ]
+
 helper=/usr/lib/g7telegram-devops/g7tg-exec
 if /usr/sbin/runuser -u g7tg-agent -- "$helper" check-reboot; then
     echo "server reboot must be disabled by default" >&2

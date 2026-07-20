@@ -28,7 +28,7 @@ Agent는 전용 비권한 사용자로 실행합니다. root 권한이 필요한
 
 서비스 restart는 조회 화면에서 바로 실행하지 않습니다. Agent가 대상, 현재 상태, 영향과 만료시간을 보여준 뒤 단회 callback 승인을 받아 실행합니다.
 
-전체 서버 재시작은 기본 비활성입니다. 로컬 `setup`이 root 소유 허용파일을 만든 서버에서만 메뉴를 표시하고, owner가 60초 단회 확인문구를 직접 입력해야 고정된 root helper가 `systemctl reboot`를 실행합니다. Agent는 기존 boot ID를 SQLite에 남기고 다음 부팅에서 변경을 확인한 뒤 완료 메시지를 전송합니다.
+전체 서버 재시작은 기본 비활성입니다. 로컬 `setup` 또는 `g7tg power enable`이 root 소유 허용파일을 만든 서버에서만 메뉴를 표시하고, owner가 60초 단회 확인문구를 직접 입력해야 고정된 root helper가 `systemctl reboot`를 실행합니다. Agent는 기존 boot ID를 SQLite에 남기고 다음 부팅에서 변경을 확인한 뒤 완료 메시지를 전송합니다.
 
 ## GnuBoard 처리
 

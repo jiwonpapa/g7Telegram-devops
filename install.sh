@@ -2,7 +2,7 @@
 set -eu
 
 REPOSITORY=jiwonpapa/g7Telegram-devops
-DEFAULT_RELEASE_VERSION=0.6.1-beta.5
+DEFAULT_RELEASE_VERSION=0.6.1-beta.6
 requested_version=${G7TG_VERSION:-$DEFAULT_RELEASE_VERSION}
 skip_setup=${G7TG_SKIP_SETUP:-0}
 force_setup=${G7TG_RUN_SETUP:-0}

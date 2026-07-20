@@ -129,7 +129,20 @@ GnuBoard 5/7 코어나 PHP를 수정하지 않습니다. GnuBoard 7의 queue, Re
 
 업데이트는 처음 설치할 때 사용한 짧은 설치 명령을 다시 실행합니다. 설정, Bot token, Telegram 관리자와 상태 DB는 유지됩니다.
 
-특정 버전 설치, 롤백, owner 교체, 완전 삭제는 [설치와 운영 문서](docs/OPERATIONS.md)를 확인하십시오.
+프로그램만 제거하고 설정과 상태를 남기려면 다음 명령을 사용합니다.
+
+```bash
+sudo apt remove g7telegram-devops
+```
+
+Bot token, Telegram 관리자, 상태 DB와 앱 전용 설정·백업까지 완전히 삭제하려면 다음 명령을 사용합니다.
+
+```bash
+sudo apt purge g7telegram-devops
+sudo rm -rf /etc/g7telegram-devops /var/lib/g7telegram-devops
+```
+
+두 번째 명령은 이전 Beta에서 수동으로 생성된 설정 백업까지 지우기 위한 호환 정리입니다. 필요한 설정이 있다면 먼저 별도로 백업하십시오. 특정 버전 설치, 롤백과 owner 교체는 [설치와 운영 문서](docs/OPERATIONS.md)를 확인하십시오.
 
 ## 설치 스크립트 검토 후 실행
 

@@ -62,4 +62,14 @@ database_bytes=$(/usr/bin/stat -c %s /var/lib/g7telegram-devops/state.sqlite3)
     exit 1
 }
 
+# 패키지에 속하지 않는 이전 수동 설정 백업도 purge에서 남기지 않습니다.
+/usr/bin/touch /etc/g7telegram-devops/agent.toml.pre-purge-test
+/usr/bin/apt-get purge -y -qq g7telegram-devops
+[ ! -e /etc/g7telegram-devops ]
+[ ! -e /var/lib/g7telegram-devops ]
+if /usr/bin/getent passwd g7tg-agent >/dev/null 2>&1; then
+    echo "purge left the g7tg-agent user behind" >&2
+    exit 1
+fi
+
 echo "PASS: Ubuntu package smoke under 2GB limit; RSS=${rss_kib}KiB; SQLite=${database_bytes}B"

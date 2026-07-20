@@ -64,6 +64,12 @@ if /usr/bin/grep -F -q 'try-restart g7tg-agent.service' "$postinst"; then
     exit 1
 fi
 
+postrm="$root/DEBIAN/postrm"
+[ -f "$postrm" ]
+/usr/bin/grep -F -x -q \
+    '    /usr/bin/rm -rf /etc/g7telegram-devops' \
+    "$postrm"
+
 /usr/bin/grep -F -q 'install -y --allow-downgrades' install.sh
 /usr/bin/grep -F -q 'Agent health: PASS' install.sh
 

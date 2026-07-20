@@ -149,9 +149,17 @@ G7TG_DEPLOY_TARGET=g7devops scripts/release-local.sh
 
 ## 제거
 
-설정과 상태를 남기려면 remove, 모두 제거하려면 purge를 사용합니다.
+프로그램만 제거하고 설정, Bot token, Telegram 관리자와 상태 DB를 남기려면 `remove`를 사용합니다.
 
 ```bash
 sudo apt remove g7telegram-devops
-sudo apt purge g7telegram-devops
 ```
+
+앱 전용 데이터까지 완전히 삭제하려면 `purge` 후 호환 정리를 실행합니다.
+
+```bash
+sudo apt purge g7telegram-devops
+sudo rm -rf /etc/g7telegram-devops /var/lib/g7telegram-devops
+```
+
+두 번째 명령은 이전 Beta에서 수동으로 생성된 `agent.toml.*` 백업도 제거합니다. 필요한 설정이 있다면 먼저 별도로 백업하십시오. 다음 패키지부터는 `purge` 단계 자체에서 앱 전용 설정·백업, token, 관리자 연결과 상태 DB를 모두 제거합니다.

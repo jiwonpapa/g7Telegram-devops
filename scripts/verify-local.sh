@@ -14,6 +14,7 @@ done
 scripts/check.sh
 cargo audit
 shellcheck \
+    install.sh \
     scripts/*.sh \
     packaging/deb/postinst \
     packaging/deb/prerm \

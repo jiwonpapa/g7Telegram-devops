@@ -64,3 +64,11 @@
 - Telegram 설정의 6·12·24시간 정기 상태 요약
 - BotFather token 발급·폐기·교체 문서화
 - prerelease 로컬 릴리스와 `g7devops` 배포 검증
+
+## 배치 8 — 간편 설치 진입점
+
+- 최상위 `install.sh`를 공개 설치 진입점으로 제공
+- 설치기 내부에서 현재 Beta 버전을 선택해 사용자 버전 입력 제거
+- 기존 `scripts/install.sh` URL은 호환 wrapper로 유지
+- README를 5분 설치·연결·정상 확인 중심으로 축소
+- installer 기본 버전과 Cargo 버전 불일치 시 로컬 gate 실패

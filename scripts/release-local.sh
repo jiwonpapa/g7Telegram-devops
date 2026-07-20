@@ -43,30 +43,32 @@ else
     git tag -a "$tag" -m "$tag"
 fi
 
-git push origin main
 git push origin "$tag"
 
 if gh release view "$tag" >/dev/null 2>&1; then
-    echo "GitHub Release already exists: $tag" >&2
-    exit 1
+    echo "GitHub Release already exists: $tag"
+else
+    case "$version" in
+        *-*)
+            gh release create "$tag" \
+                "$package" \
+                dist/SHA256SUMS \
+                install.sh \
+                --generate-notes \
+                --verify-tag \
+                --prerelease
+            ;;
+        *)
+            gh release create "$tag" \
+                "$package" \
+                dist/SHA256SUMS \
+                install.sh \
+                --generate-notes \
+                --verify-tag
+            ;;
+    esac
 fi
-case "$version" in
-    *-*)
-        gh release create "$tag" \
-            "$package" \
-            dist/SHA256SUMS \
-            --generate-notes \
-            --verify-tag \
-            --prerelease
-        ;;
-    *)
-        gh release create "$tag" \
-            "$package" \
-            dist/SHA256SUMS \
-            --generate-notes \
-            --verify-tag
-        ;;
-esac
+git push origin main
 
 echo "PASS: local release $tag"
 if [ -n "${G7TG_DEPLOY_TARGET:-}" ]; then

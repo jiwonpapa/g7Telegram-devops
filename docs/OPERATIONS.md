@@ -9,12 +9,13 @@
 ## 설치
 
 간편 설치 명령은 GitHub Release의 `.deb`와 `SHA256SUMS`를 내려받아 일치할 때만 `apt`로 설치합니다.
-SSH 접속부터 Bot 연결과 정상 확인까지의 실제 콘솔 입력 예시는 [README CLI 설치 도움말](../README.md#서버-콘솔에서-설치-따라하기)을 참고하십시오.
+SSH 접속부터 Bot 연결과 정상 확인까지의 간단한 흐름은 [README 5분 설치](../README.md#5분-설치)를 참고하십시오.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7Telegram-devops/main/scripts/install.sh \
-  | sudo G7TG_VERSION=0.6.1-beta.1 sh
+curl -fsSL https://github.com/jiwonpapa/g7Telegram-devops/raw/main/install.sh | sudo sh
 ```
+
+최상위 `install.sh`가 현재 공개 Beta 버전을 내부에서 선택하므로 일반 사용자는 버전을 입력하지 않습니다. 기존 `scripts/install.sh` URL은 이전 문서와 자동화의 호환을 위해 유지합니다.
 
 ## Bot token 발급
 
@@ -52,8 +53,8 @@ sudo g7tg setup
 자동 설치에서 초기설정을 건너뛰려면 다음처럼 실행합니다.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7Telegram-devops/main/scripts/install.sh \
-  | sudo G7TG_VERSION=0.6.1-beta.1 G7TG_SKIP_SETUP=1 sh
+curl -fsSL https://github.com/jiwonpapa/g7Telegram-devops/raw/main/install.sh \
+  | sudo G7TG_SKIP_SETUP=1 sh
 ```
 
 ## 상태 확인
@@ -107,18 +108,17 @@ sudo g7tg setup
 
 ## 업데이트와 롤백
 
-공개 Beta는 버전을 고정해 Release checksum을 검증하고 설치합니다. 설정된 서버에서는 Agent 재시작, `doctor`, 활성 상태 검증까지 통과해야 설치 성공으로 끝납니다.
+기본 명령을 다시 실행하면 현재 공개 Beta로 업데이트합니다. 설정된 서버에서는 Agent 재시작, `doctor`, 활성 상태 검증까지 통과해야 설치 성공으로 끝납니다.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7Telegram-devops/main/scripts/install.sh \
-  | sudo G7TG_VERSION=0.6.1-beta.1 sh
+curl -fsSL https://github.com/jiwonpapa/g7Telegram-devops/raw/main/install.sh | sudo sh
 ```
 
 특정 버전 설치와 롤백은 `VERSION`을 지정합니다. 설정과 SQLite 상태는 유지됩니다.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7Telegram-devops/main/scripts/install.sh \
-  | sudo G7TG_VERSION=0.6.1-beta.1 sh
+curl -fsSL https://github.com/jiwonpapa/g7Telegram-devops/raw/main/install.sh \
+  | sudo G7TG_VERSION=0.6.1-beta.2 sh
 ```
 
 ## 관리자 로컬 릴리스와 배포

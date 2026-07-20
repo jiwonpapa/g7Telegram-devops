@@ -42,8 +42,8 @@ pub async fn run(
         None => prompt_server_name(&default_server_name(config))?,
     };
 
-    let token =
-        rpassword::prompt_password("Telegram Bot token: ").context("Bot token 입력 실패")?;
+    let token = rpassword::prompt_password("Telegram Bot token (숨김 입력): ")
+        .context("Bot token 입력 실패")?;
     let telegram = TelegramClient::from_token(&token)?;
     let bot = telegram
         .get_me()
@@ -159,8 +159,8 @@ fn configure_primary_web_check(
 
 fn prompt_web_url(existing_url: Option<&str>) -> anyhow::Result<Option<String>> {
     match existing_url {
-        Some(url) => print!("Web status URL (Enter=keep) [{url}]: "),
-        None => print!("Web status URL (optional, Enter=skip): "),
+        Some(url) => print!("웹 상태 확인 주소 (Enter=기존값 유지) [{url}]: "),
+        None => print!("웹 상태 확인 주소 (선택, Enter=건너뜀): "),
     }
     io::stdout().flush().context("web URL prompt 출력 실패")?;
     let mut input = String::new();
@@ -226,7 +226,7 @@ fn default_server_name(config: &AgentConfig) -> String {
 }
 
 fn prompt_server_name(default: &str) -> anyhow::Result<String> {
-    print!("Server name [{default}]: ");
+    print!("서버 이름 [{default}]: ");
     io::stdout()
         .flush()
         .context("server name prompt 출력 실패")?;

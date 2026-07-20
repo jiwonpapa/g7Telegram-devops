@@ -64,7 +64,7 @@ if /usr/bin/grep -F -q 'try-restart g7tg-agent.service' "$postinst"; then
     exit 1
 fi
 
-/usr/bin/grep -F -q 'install -y --allow-downgrades' scripts/install.sh
-/usr/bin/grep -F -q 'Agent health: PASS' scripts/install.sh
+/usr/bin/grep -F -q 'install -y --allow-downgrades' install.sh
+/usr/bin/grep -F -q 'Agent health: PASS' install.sh
 
 echo "PASS: package structure and permissions"

@@ -16,6 +16,7 @@
 - Ubuntu 22.04에서 만든 amd64 패키지를 22.04와 24.04에 각각 설치
 - 이전 SQLite schema 자동 migration, owner 안전 교체, 16자리 pairing과 실패 제한
 - 서비스 pagination, 정기 상태 요약 허용값·주기 계산, scoped collector 대조, bounded 감사로그
+- 최상위 installer 기본 버전과 Cargo 버전 일치, 기존 installer URL 호환 wrapper ShellCheck
 - 패키지 재시작 실패 전파, downgrade 허용, 설치 후 health gate 정적 검사
 
 이 gate는 저사양 설치 적합성을 확인하지만, 실제 Bot token과 운영 서비스가 필요한 `VPS_PASS`를 대신하지 않습니다.

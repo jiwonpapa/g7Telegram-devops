@@ -31,7 +31,7 @@ gh release view "v$version" >/dev/null
 # version은 위 allowlist 검사 후 원격 명령에 전달합니다.
 # shellcheck disable=SC2029
 ssh "$target" \
-    "curl -fsSL https://raw.githubusercontent.com/jiwonpapa/g7Telegram-devops/main/scripts/install.sh | sudo -n env G7TG_VERSION=$version G7TG_SKIP_SETUP=1 sh"
+    "curl -fsSL https://github.com/jiwonpapa/g7Telegram-devops/raw/main/install.sh | sudo -n env G7TG_VERSION=$version G7TG_SKIP_SETUP=1 sh"
 ssh "$target" \
     "g7tg --version && systemctl is-active g7tg-agent.service && systemctl show g7tg-agent.service -p NRestarts"
 

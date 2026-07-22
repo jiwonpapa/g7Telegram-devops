@@ -27,7 +27,11 @@ esac
 
 image=g7telegram-devops-release:rust-1.96.0
 package="g7telegram-devops_${version}_amd64.deb"
-mkdir -p "$repository/dist"
+scripts/clean-local.sh --workspace-only
+build_root=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/g7tg-package.XXXXXX")
+trap '/bin/rm -rf "$build_root"' EXIT HUP INT TERM
+artifact_dir=${G7TG_ARTIFACT_DIR:-$build_root/artifacts}
+/bin/mkdir -p "$artifact_dir"
 
 docker build \
     --platform linux/amd64 \
@@ -37,9 +41,10 @@ docker build \
 docker run --rm \
     --platform linux/amd64 \
     --volume "$repository:/workspace:ro" \
-    --volume "$repository/dist:/dist" \
+    --volume "$artifact_dir:/dist" \
     --volume g7telegram-devops-cargo-registry:/opt/cargo/registry \
-    --volume g7telegram-devops-amd64-target:/workspace/target \
+    --volume g7telegram-devops-amd64-target:/build-target \
+    --env CARGO_TARGET_DIR=/build-target \
     --workdir /workspace \
     "$image" \
     sh -ceu '
@@ -48,7 +53,7 @@ docker run --rm \
         debian_version=$(printf "%s\n" "$version" | sed "s/-/~/")
         scripts/check.sh
         cargo deb -p g7tg-agent
-        built=$(find target/debian -maxdepth 1 -type f \
+        built=$(find "$CARGO_TARGET_DIR/debian" -maxdepth 1 -type f \
             -name "g7telegram-devops_${debian_version}-*_amd64.deb" -print -quit)
         test -n "$built"
         cp "$built" "/dist/$package"
@@ -61,10 +66,13 @@ for ubuntu in 22.04 24.04; do
     docker run --rm \
         --platform linux/amd64 \
         --memory 2g \
-        --volume "$repository/dist:/dist:ro" \
+        --volume "$artifact_dir:/dist:ro" \
         --volume "$repository/scripts:/workspace-scripts:ro" \
         "ubuntu:$ubuntu" \
         /workspace-scripts/container-smoke.sh "/dist/$package"
 done
 
-echo "PASS: local amd64 package $repository/dist/$package"
+echo "PASS: local amd64 package verified: $artifact_dir/$package"
+if [ -z "${G7TG_ARTIFACT_DIR:-}" ]; then
+    echo "Temporary build artifacts will be removed automatically."
+fi

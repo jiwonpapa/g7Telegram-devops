@@ -4,6 +4,8 @@ set -eu
 repository=$(unset CDPATH; cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repository"
 
+scripts/clean-local.sh --workspace-only
+
 for command in cargo cargo-audit shellcheck; do
     command -v "$command" >/dev/null 2>&1 || {
         echo "required command not found: $command" >&2

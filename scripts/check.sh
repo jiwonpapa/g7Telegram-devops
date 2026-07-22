@@ -1,6 +1,14 @@
 #!/bin/sh
 set -eu
 
+if [ -z "${CARGO_TARGET_DIR:-}" ]; then
+    script_dir=$(unset CDPATH; cd -- "$(dirname -- "$0")" && pwd)
+    cache_root=$("$script_dir/build-cache-dir.sh")
+    /bin/mkdir -p "$cache_root/host-target"
+    : > "$cache_root/.g7telegram-devops-build-cache"
+    export CARGO_TARGET_DIR="$cache_root/host-target"
+fi
+
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace

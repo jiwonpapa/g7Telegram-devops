@@ -227,6 +227,8 @@ rm -f g7tg-install.sh
 - [검증 기준](docs/VERIFICATION.md)
 - [홍보 이미지 3종](docs/assets/README.md)
 
+개발·릴리스 검사는 저장소 밖 빌드 캐시를 재사용해 속도를 유지하며, 백업에 불필요한 `target/`과 `dist/`는 자동 정리합니다. 기존 빌드 찌꺼기는 `scripts/clean-local.sh`로 소스에 영향 없이 제거할 수 있습니다.
+
 ## 라이선스
 
 Copyright 2026 G7Telegram DevOps Contributors. 이 프로젝트는 [Apache License 2.0](LICENSE)으로 배포합니다. 전체 무보증·책임 제한은 라이선스 제7조와 제8조를 따릅니다. 배포물에는 [NOTICE](NOTICE)를 함께 포함해야 합니다.

@@ -27,6 +27,8 @@
 
 GitHub Actions는 사용하지 않습니다. `scripts/release-local.sh`가 로컬 gate를 모두 다시 통과한 경우에만 태그와 GitHub Release를 생성합니다.
 
+모든 공식 로컬 gate는 저장소 밖 전용 `CARGO_TARGET_DIR`과 Docker volume을 재사용해 빌드 속도를 유지합니다. 패키지와 checksum은 Release 업로드 후 제거하며, 저장소의 `target/`·`dist/`는 gate 시작 시 자동 정리합니다. 캐시는 `scripts/clean-local.sh --purge-cache`를 명시한 경우에만 삭제합니다.
+
 ## VPS 검증 절차
 
 1. Ubuntu 버전과 가용 메모리를 기록합니다.

@@ -143,6 +143,26 @@ scripts/deploy-local.sh g7devops
 G7TG_DEPLOY_TARGET=g7devops scripts/release-local.sh
 ```
 
+공식 검사·패키지·릴리스 스크립트는 Cargo와 Docker 빌드 캐시를 저장소 밖의 전용 캐시에 유지합니다. 따라서 재빌드는 빠르게 유지하면서 프로젝트의 `target/`·`dist/`와 임시 `.deb`·checksum은 성공·실패와 관계없이 자동 정리되어 소스 백업에 포함되지 않습니다.
+
+기존 산출물을 즉시 정리할 때는 다음 명령만 실행합니다. 소스, 설정 예제, Git 파일은 삭제하지 않습니다.
+
+```bash
+scripts/clean-local.sh
+```
+
+빌드 캐시까지 완전히 비워야 할 때만 다음 명령을 사용합니다. 다음 빌드는 느려집니다.
+
+```bash
+scripts/clean-local.sh --purge-cache
+```
+
+패키지를 로컬에 의도적으로 보관해야 할 때만 출력 경로를 명시합니다.
+
+```bash
+G7TG_ARTIFACT_DIR=/tmp/g7tg-artifacts scripts/build-package-local.sh
+```
+
 ## 알림중지와 데이터 보존
 
 - 알림중지 중 발생·복구한 개별 알림은 지연 전송하지 않습니다.

@@ -28,10 +28,14 @@ version=${1:-$crate_version}
     exit 1
 }
 tag=v$version
-package="dist/g7telegram-devops_${version}_amd64.deb"
+release_root=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/g7tg-release.XXXXXX")
+trap '/bin/rm -rf "$release_root"' EXIT HUP INT TERM
+artifact_dir="$release_root/artifacts"
+/bin/mkdir -p "$artifact_dir"
+package="$artifact_dir/g7telegram-devops_${version}_amd64.deb"
 
 scripts/verify-local.sh
-scripts/build-package-local.sh "$version"
+G7TG_ARTIFACT_DIR="$artifact_dir" scripts/build-package-local.sh "$version"
 
 head_commit=$(git rev-parse HEAD)
 if git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null; then
@@ -52,7 +56,7 @@ else
         *-*)
             gh release create "$tag" \
                 "$package" \
-                dist/SHA256SUMS \
+                "$artifact_dir/SHA256SUMS" \
                 install.sh \
                 --generate-notes \
                 --verify-tag \
@@ -61,7 +65,7 @@ else
         *)
             gh release create "$tag" \
                 "$package" \
-                dist/SHA256SUMS \
+                "$artifact_dir/SHA256SUMS" \
                 install.sh \
                 --generate-notes \
                 --verify-tag
